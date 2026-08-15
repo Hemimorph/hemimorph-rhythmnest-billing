@@ -1,0 +1,14 @@
+
+product: jvm/app
+
+dependencies:
+  - $ktor.server.core
+  - $ktor.server.netty
+  - $libs.logback.classic
+
+test-dependencies:
+  - $ktor.server.testHost
+
+settings:
+  ktor: enabled
+
