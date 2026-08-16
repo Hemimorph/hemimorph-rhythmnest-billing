@@ -19,7 +19,7 @@ class OpenApiGenerationTest {
     @Test
     fun generateOpenApi() = testApplication {
         application {
-            rootModule("openapi-generation-token")
+            testRootModule("openapi-generation-token")
             val document = (
                 OpenApiDoc(info = OpenApiInfo("RhythmNest Billing API", "1.0.0")) +
                     routingRoot.descendants()

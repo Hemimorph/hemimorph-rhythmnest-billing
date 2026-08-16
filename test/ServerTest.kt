@@ -10,7 +10,7 @@ class ServerTest {
     @Test
     fun `test root endpoint`() = testApplication {
         application {
-            rootModule("test-token")
+            testRootModule("test-token")
         }
         // verify server root returns 200
         assertEquals(HttpStatusCode.OK, client.get("/").status)

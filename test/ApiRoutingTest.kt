@@ -32,7 +32,7 @@ class ApiRoutingTest {
 
     @Test
     fun `all API routes require authentication`() = testApplication {
-        application { rootModule("test-token") }
+        application { testRootModule("test-token") }
 
         routes.forEach { (method, path) ->
             assertEquals(
@@ -45,7 +45,7 @@ class ApiRoutingTest {
 
     @Test
     fun `rejects an incorrect API token`() = testApplication {
-        application { rootModule("test-token") }
+        application { testRootModule("test-token") }
 
         val response = client.request("/guest/count") {
             method = HttpMethod.Get
@@ -57,7 +57,7 @@ class ApiRoutingTest {
 
     @Test
     fun `rejects invalid change limit`() = testApplication {
-        application { rootModule("test-token") }
+        application { testRootModule("test-token") }
 
         val response = client.request("/guest/user/changes?limit=0") {
             method = HttpMethod.Get
@@ -69,7 +69,7 @@ class ApiRoutingTest {
 
     @Test
     fun `requires idempotency key for balance adjustment`() = testApplication {
-        application { rootModule("test-token") }
+        application { testRootModule("test-token") }
 
         val response = client.request("/admin/user/balance") {
             method = HttpMethod.Post
@@ -84,7 +84,7 @@ class ApiRoutingTest {
 
     @Test
     fun `rejects zero balance adjustment`() = testApplication {
-        application { rootModule("test-token") }
+        application { testRootModule("test-token") }
 
         val response = client.request("/admin/user/balance") {
             method = HttpMethod.Post
@@ -100,7 +100,7 @@ class ApiRoutingTest {
 
     @Test
     fun `rejects blank balance adjustment reason`() = testApplication {
-        application { rootModule("test-token") }
+        application { testRootModule("test-token") }
 
         val response = client.request("/admin/user/balance") {
             method = HttpMethod.Post
@@ -116,7 +116,7 @@ class ApiRoutingTest {
 
     @Test
     fun `requires operator header`() = testApplication {
-        application { rootModule("test-token") }
+        application { testRootModule("test-token") }
 
         val response = client.request("/guest/user/balance") {
             method = HttpMethod.Get

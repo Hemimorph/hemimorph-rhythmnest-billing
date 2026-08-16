@@ -1,5 +1,8 @@
 package io.github.hemimogph
 
+import io.ktor.server.application.Application
+import io.ktor.server.application.ApplicationStopped
+import kotlinx.coroutines.runBlocking
 import org.jetbrains.exposed.v1.jdbc.Database
 import org.jetbrains.exposed.v1.jdbc.SchemaUtils
 import org.jetbrains.exposed.v1.jdbc.insert
@@ -28,4 +31,12 @@ fun createTestDatabaseQueue(
         }
     }
     return DatabaseQueue(database, ZoneOffset.UTC)
+}
+
+fun Application.testRootModule(apiToken: String) {
+    val queue = createTestDatabaseQueue()
+    monitor.subscribe(ApplicationStopped) {
+        runBlocking { queue.shutdown() }
+    }
+    rootModule(queue, apiToken)
 }
