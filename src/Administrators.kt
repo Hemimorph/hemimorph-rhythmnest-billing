@@ -11,7 +11,10 @@ suspend fun DatabaseQueue.addAdministrator(
     operatorId: String,
     note: String,
     requestedAtMs: Long,
-): MutationResult = write {
+): MutationResult = write(
+    "addAdministrator",
+    mapOf("targetId" to targetId, "operatorId" to operatorId, "note" to note, "requestedAtMs" to requestedAtMs),
+) {
     if (!isAdministrator(operatorId)) {
         insertOperation(
             requestedAtMs,
@@ -40,7 +43,10 @@ suspend fun DatabaseQueue.deleteAdministrator(
     operatorId: String,
     note: String,
     requestedAtMs: Long,
-): MutationResult = write {
+): MutationResult = write(
+    "deleteAdministrator",
+    mapOf("targetId" to targetId, "operatorId" to operatorId, "note" to note, "requestedAtMs" to requestedAtMs),
+) {
     if (!isAdministrator(operatorId)) {
         insertOperation(
             requestedAtMs,

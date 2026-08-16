@@ -12,7 +12,7 @@ data class Debt(
     val balance: Long,
 )
 
-suspend fun DatabaseQueue.rates(): List<RatePeriod> = execute {
+suspend fun DatabaseQueue.rates(): List<RatePeriod> = execute("rates") {
     loadRates()
 }
 
@@ -23,7 +23,15 @@ suspend fun DatabaseQueue.replaceRates(
     requestedAtMs: Long,
 ): MutationResult {
     val validated = validateRatePeriods(periods)
-    return write {
+    return write(
+        "replaceRates",
+        mapOf(
+            "periods" to validated,
+            "operatorId" to operatorId,
+            "note" to note,
+            "requestedAtMs" to requestedAtMs,
+        ),
+    ) {
         if (!isAdministrator(operatorId)) {
             insertOperation(
                 requestedAtMs,
@@ -61,7 +69,10 @@ suspend fun DatabaseQueue.replaceRates(
 suspend fun DatabaseQueue.debts(
     operatorId: String,
     requestedAtMs: Long,
-): AccessResult<List<Debt>> = write {
+): AccessResult<List<Debt>> = write(
+    "debts",
+    mapOf("operatorId" to operatorId, "requestedAtMs" to requestedAtMs),
+) {
     if (!isAdministrator(operatorId)) {
         insertOperation(
             requestedAtMs,

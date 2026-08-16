@@ -86,7 +86,10 @@ suspend fun DatabaseQueue.login(
     operatorId: String,
     note: String,
     requestedAtMs: Long,
-): MutationResult = write {
+): MutationResult = write(
+    "login",
+    mapOf("targetId" to targetId, "operatorId" to operatorId, "note" to note, "requestedAtMs" to requestedAtMs),
+) {
     if (!canOperateGuest(operatorId, targetId)) {
         insertOperation(
             requestedAtMs,
@@ -135,7 +138,10 @@ suspend fun DatabaseQueue.logout(
     operatorId: String,
     note: String,
     requestedAtMs: Long,
-): LogoutResult = write {
+): LogoutResult = write(
+    "logout",
+    mapOf("targetId" to targetId, "operatorId" to operatorId, "note" to note, "requestedAtMs" to requestedAtMs),
+) {
     if (!canOperateGuest(operatorId, targetId)) {
         insertOperation(
             requestedAtMs,
@@ -203,11 +209,11 @@ suspend fun DatabaseQueue.logout(
     }
 }
 
-suspend fun DatabaseQueue.guestCount(): Long = execute {
+suspend fun DatabaseQueue.guestCount(): Long = execute("guestCount") {
     ActiveGuests.selectAll().count()
 }
 
-suspend fun DatabaseQueue.activeGuests(): List<ActiveGuest> = execute {
+suspend fun DatabaseQueue.activeGuests(): List<ActiveGuest> = execute("activeGuests") {
     ActiveGuests.selectAll()
         .orderBy(
             ActiveGuests.enteredAtMs to SortOrder.ASC,
@@ -225,7 +231,10 @@ suspend fun DatabaseQueue.balance(
     targetId: String,
     operatorId: String,
     requestedAtMs: Long,
-): AccessResult<Long> = write {
+): AccessResult<Long> = write(
+    "balance",
+    mapOf("targetId" to targetId, "operatorId" to operatorId, "requestedAtMs" to requestedAtMs),
+) {
     if (!canOperateGuest(operatorId, targetId)) {
         insertOperation(requestedAtMs, operatorId, targetId, OperationType.BALANCE_QUERY, false, "NOT_SELF_OR_ADMIN")
         AccessResult(false, null)
@@ -244,7 +253,15 @@ suspend fun DatabaseQueue.balanceChanges(
     operatorId: String,
     limit: Int,
     requestedAtMs: Long,
-): AccessResult<List<BalanceChange>> = write {
+): AccessResult<List<BalanceChange>> = write(
+    "balanceChanges",
+    mapOf(
+        "targetId" to targetId,
+        "operatorId" to operatorId,
+        "limit" to limit,
+        "requestedAtMs" to requestedAtMs,
+    ),
+) {
     if (!canOperateGuest(operatorId, targetId)) {
         insertOperation(requestedAtMs, operatorId, targetId, OperationType.CHANGES_QUERY, false, "NOT_SELF_OR_ADMIN")
         return@write AccessResult(false, null)
@@ -281,7 +298,10 @@ suspend fun DatabaseQueue.bill(
     targetId: String,
     operatorId: String,
     calculatedAtMs: Long,
-): AccessResult<Bill> = write {
+): AccessResult<Bill> = write(
+    "bill",
+    mapOf("targetId" to targetId, "operatorId" to operatorId, "calculatedAtMs" to calculatedAtMs),
+) {
     if (!canOperateGuest(operatorId, targetId)) {
         insertOperation(
             calculatedAtMs,
@@ -322,7 +342,16 @@ suspend fun DatabaseQueue.adjustBalance(
     delta: Long,
     reason: String,
     requestedAtMs: Long,
-): BalanceAdjustment = write {
+): BalanceAdjustment = write(
+    "adjustBalance",
+    mapOf(
+        "targetId" to targetId,
+        "operatorId" to operatorId,
+        "delta" to delta,
+        "reason" to reason,
+        "requestedAtMs" to requestedAtMs,
+    ),
+) {
     val balanceRow = Balances.selectAll()
         .where { Balances.userId eq targetId }
         .singleOrNull()
@@ -462,9 +491,13 @@ private fun JdbcTransaction.insertLogoutOperation(
 private fun JdbcTransaction.canOperateGuest(operatorId: String, targetId: String): Boolean =
     operatorId == targetId || isAdministrator(operatorId)
 
-internal suspend fun <T> DatabaseQueue.write(block: JdbcTransaction.() -> T): T =
+internal suspend fun <T> DatabaseQueue.write(
+    operation: String,
+    parameters: Map<String, Any?>,
+    block: JdbcTransaction.() -> T,
+): T =
     try {
-        execute(block)
+        execute(operation, parameters, block)
     } catch (failure: Throwable) {
         if (failure.hasSqlState("23505")) throw OperationConflictException()
         throw failure

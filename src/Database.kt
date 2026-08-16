@@ -42,6 +42,8 @@ class DatabaseQueue internal constructor(
     private class Task<T>(
         val id: Long,
         val queuedAtNanos: Long,
+        val operation: String,
+        val input: String,
         val block: JdbcTransaction.() -> T,
         val result: CompletableDeferred<T>,
     )
@@ -56,11 +58,21 @@ class DatabaseQueue internal constructor(
         }
     }
 
-    suspend fun <T> execute(block: JdbcTransaction.() -> T): T {
+    suspend fun <T> execute(
+        operation: String = "anonymous",
+        parameters: Map<String, Any?> = emptyMap(),
+        block: JdbcTransaction.() -> T,
+    ): T {
         val transactionId = transactionSequence.incrementAndGet()
         val result = CompletableDeferred<T>()
-        logger.info("Database transaction queued transactionId={}", transactionId)
-        tasks.send(Task(transactionId, System.nanoTime(), block, result))
+        val input = parameters.toSafeLogValue()
+        logger.info(
+            "Database transaction queued transactionId={} operation={} input={}",
+            transactionId,
+            operation,
+            input,
+        )
+        tasks.send(Task(transactionId, System.nanoTime(), operation, input, block, result))
         return result.await()
     }
 
@@ -73,28 +85,41 @@ class DatabaseQueue internal constructor(
     private fun <T> executeTask(database: Database, task: Task<T>) {
         val startedAtNanos = System.nanoTime()
         logger.info(
-            "Database transaction started transactionId={} queueWaitMs={}",
+            "Database transaction started transactionId={} operation={} input={} queueWaitMs={}",
             task.id,
+            task.operation,
+            task.input,
             (startedAtNanos - task.queuedAtNanos).nanoseconds.inWholeMilliseconds,
         )
         try {
             val value = transaction(database) { task.block(this) }
             logger.info(
-                "Database transaction committed transactionId={} durationMs={}",
+                "Database transaction committed transactionId={} operation={} input={} output={} durationMs={}",
                 task.id,
+                task.operation,
+                task.input,
+                value.toSafeLogValue(),
                 (System.nanoTime() - startedAtNanos).nanoseconds.inWholeMilliseconds,
             )
             task.result.complete(value)
         } catch (failure: Throwable) {
             logger.error(
-                "Database transaction rolled back transactionId={} durationMs={} failureType={}",
+                "Database transaction rolled back transactionId={} operation={} input={} durationMs={} failureType={} failureMessage={}",
                 task.id,
+                task.operation,
+                task.input,
                 (System.nanoTime() - startedAtNanos).nanoseconds.inWholeMilliseconds,
                 failure::class.qualifiedName,
+                failure.message.toSafeLogValue(),
             )
             task.result.completeExceptionally(failure)
         }
     }
+}
+
+private fun Any?.toSafeLogValue(): String {
+    val sanitized = toString().replace('\r', ' ').replace('\n', ' ')
+    return if (sanitized.length <= 16_384) sanitized else sanitized.take(16_384) + "<truncated>"
 }
 
 class DatabaseRuntime private constructor(

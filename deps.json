@@ -358,6 +358,15 @@
    "module": "sha256-tMAPI9hEQzuMMu/kb/sAXHq81G+1zmABwKSj/eh4CsI=",
    "pom": "sha256-RkCxNQl6C7LHDno8xkCIAbdVvzUJYlesRBDBnNETfsY="
   },
+  "io/ktor#ktor-server-double-receive-jvm/3.4.3": {
+   "jar": "sha256-d58/hhJEFpQb+XqB/DrWcP+xIuaebaj3AxC0QtJ5Oyg=",
+   "module": "sha256-l2AH2fZzzwiHEXT30KXLe+qNKYyB0bfTq1kmiE0P7UI=",
+   "pom": "sha256-yB9ZW7sbFhHWpy1M47ntGEgzmdWAnYk2Jo8eIEShjkk="
+  },
+  "io/ktor#ktor-server-double-receive/3.4.3": {
+   "module": "sha256-vxSSYIVnnqwFHYlJjOmq1SNArPVkKdrC7amiU3ou6sg=",
+   "pom": "sha256-+BvWVz3zuXGJ5VhNbIm/YVhD3KUH05H4gwnTuxaF3KI="
+  },
   "io/ktor#ktor-server-netty-jvm/3.4.3": {
    "jar": "sha256-eoP+AK1aQqYv1TVmjvoNWgSyiAeLBHRFDq12J6GFKu8=",
    "module": "sha256-4qIYc5L9FUvKE1JQ1dQRdoU2omxcL7XKf10TjdUthcg=",
