@@ -51,7 +51,16 @@ private data class RatesUpdateRequest(
 )
 
 @Serializable
-private data class GuestCountResponse(val count: Long)
+private data class ActiveGuestResponse(
+    val userId: String,
+    val enteredAtMs: Long,
+)
+
+@Serializable
+private data class GuestCountResponse(
+    val count: Long,
+    val guests: List<ActiveGuestResponse>,
+)
 
 @Serializable
 private data class BalanceResponse(
@@ -60,10 +69,16 @@ private data class BalanceResponse(
 )
 
 @Serializable
+private enum class BalanceChangeType {
+    LOGOUT,
+    ADMIN_ADJUST,
+}
+
+@Serializable
 private data class BalanceChangeResponse(
     val requestedAtMs: Long,
     val operatorId: String,
-    val type: String,
+    val type: BalanceChangeType,
     val delta: Long,
     val balanceAfter: Long,
     val reason: String,
@@ -72,10 +87,27 @@ private data class BalanceChangeResponse(
 @Serializable
 private data class BillResponse(
     val userId: String,
-    val active: Boolean,
-    val enteredAtMs: Long?,
+    val enteredAtMs: Long,
     val calculatedAtMs: Long,
+    val periodCharges: List<PeriodChargeResponse>,
     val amount: Long,
+)
+
+@Serializable
+private data class PeriodChargeResponse(
+    val startedAtMs: Long,
+    val endedAtMs: Long,
+    val amount: Long,
+)
+
+@Serializable
+private data class CheckoutResponse(
+    val userId: String,
+    val enteredAtMs: Long,
+    val exitedAtMs: Long,
+    val periodCharges: List<PeriodChargeResponse>,
+    val totalAmount: Long,
+    val remainingBalance: Long,
 )
 
 @Serializable
@@ -143,7 +175,13 @@ fun Application.configureRouting() {
         authenticate(API_AUTHENTICATION) {
             route("/guest") {
                 get("/count") {
-                    call.respond(GuestCountResponse(databaseQueue.guestCount()))
+                    val guests = databaseQueue.activeGuests()
+                    call.respond(
+                        GuestCountResponse(
+                            count = guests.size.toLong(),
+                            guests = guests.map { ActiveGuestResponse(it.userId, it.enteredAtMs) },
+                        ),
+                    )
                 }.describe {
                     documentedOperation("Count active guests", "guest")
                     jsonResponses<GuestCountResponse>(
@@ -178,14 +216,34 @@ fun Application.configureRouting() {
                         val userId = call.requireUserId()
                         val operatorId = call.requireOperatorId()
                         val request = call.receive<OperationRequest>().validated()
-                        databaseQueue.logout(userId, operatorId, request.note, requestedAtMs).requireAllowed()
-                        call.respond(HttpStatusCode.NoContent)
+                        val checkout = databaseQueue.logout(
+                            userId,
+                            operatorId,
+                            request.note,
+                            requestedAtMs,
+                        ).requireCheckout()
+                        call.respond(
+                            CheckoutResponse(
+                                userId = userId,
+                                enteredAtMs = checkout.enteredAtMs,
+                                exitedAtMs = checkout.exitedAtMs,
+                                periodCharges = checkout.periodCharges.map { charge ->
+                                    PeriodChargeResponse(
+                                        startedAtMs = charge.startedAtMs,
+                                        endedAtMs = charge.endedAtMs,
+                                        amount = charge.amount,
+                                    )
+                                },
+                                totalAmount = checkout.totalAmount,
+                                remainingBalance = checkout.balanceAfter,
+                            ),
+                        )
                     }.describe {
                         documentedOperation("Log out and settle guest", "guest", userId = true, operatorId = true)
                         jsonRequest<OperationRequest>()
-                        emptyResponses(
-                            HttpStatusCode.NoContent,
-                            "Guest is inactive and the bill is settled",
+                        jsonResponses<CheckoutResponse>(
+                            HttpStatusCode.OK,
+                            "Checkout receipt with per-period charges",
                             HttpStatusCode.BadRequest,
                             HttpStatusCode.Unauthorized,
                             HttpStatusCode.Forbidden,
@@ -198,18 +256,28 @@ fun Application.configureRouting() {
                         val userId = call.requireUserId()
                         val operatorId = call.requireOperatorId()
                         val bill = databaseQueue.bill(userId, operatorId, requestedAtMs).requireAllowed()
+                        if (!bill.active) {
+                            call.respond(HttpStatusCode.NoContent)
+                            return@get
+                        }
                         call.respond(
                             BillResponse(
                                 userId = userId,
-                                active = bill.active,
-                                enteredAtMs = bill.enteredAtMs,
+                                enteredAtMs = checkNotNull(bill.enteredAtMs),
                                 calculatedAtMs = bill.calculatedAtMs,
+                                periodCharges = bill.periodCharges.map { charge ->
+                                    PeriodChargeResponse(
+                                        startedAtMs = charge.startedAtMs,
+                                        endedAtMs = charge.endedAtMs,
+                                        amount = charge.amount,
+                                    )
+                                },
                                 amount = bill.amount,
                             ),
                         )
                     }.describe {
                         documentedOperation("Get current bill", "guest", userId = true, operatorId = true)
-                        jsonResponses<BillResponse>(
+                        billResponses(
                             HttpStatusCode.OK,
                             "Current calculated bill",
                             HttpStatusCode.BadRequest,
@@ -250,7 +318,7 @@ fun Application.configureRouting() {
                             BalanceChangeResponse(
                                 requestedAtMs = change.requestedAtMs,
                                 operatorId = change.operatorId,
-                                type = change.type.name,
+                                type = BalanceChangeType.valueOf(change.type.name),
                                 delta = change.delta,
                                 balanceAfter = change.balanceAfter,
                                 reason = change.reason,
@@ -481,6 +549,28 @@ private inline fun <reified T : Any> Operation.Builder.jsonResponses(
     }
 }
 
+private fun Operation.Builder.billResponses(
+    status: HttpStatusCode,
+    responseDescription: String,
+    vararg errors: HttpStatusCode,
+) {
+    responses {
+        status {
+            description = responseDescription
+            schema = jsonSchema<BillResponse>()
+        }
+        HttpStatusCode.NoContent {
+            description = "Guest is not active"
+        }
+        errors.forEach { error ->
+            error {
+                description = error.description
+                schema = jsonSchema<ApiError>()
+            }
+        }
+    }
+}
+
 private fun Operation.Builder.emptyResponses(
     status: HttpStatusCode,
     responseDescription: String,
@@ -586,4 +676,11 @@ private fun <T> AccessResult<T>.requireAllowed(): T {
 private fun BalanceAdjustment.requireAllowed(): BalanceAdjustment {
     if (!allowed) throw PermissionDeniedException()
     return this
+}
+
+private fun LogoutResult.requireCheckout(): Checkout = when (status) {
+    MutationResult.APPLIED -> checkNotNull(checkout)
+    MutationResult.NO_CHANGE -> throw GuestNotActiveException()
+    MutationResult.DENIED_PERMISSION -> throw PermissionDeniedException()
+    MutationResult.DENIED_NEGATIVE_BALANCE -> error("Logout cannot be denied by balance")
 }

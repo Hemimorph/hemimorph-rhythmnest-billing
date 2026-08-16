@@ -169,11 +169,12 @@ class ApiRoutingTest {
         application { rootModule(queue, "test-token") }
 
         try {
+            val enteredAtMs = System.currentTimeMillis()
             val login = client.request("/guest/guest/login") {
                 method = HttpMethod.Put
                 bearerAuth("test-token")
                 header("X-Operator-Id", "guest")
-                header("X-Request-Timestamp", System.currentTimeMillis())
+                header("X-Request-Timestamp", enteredAtMs)
                 contentType(ContentType.Application.Json)
                 setBody("""{"note":"enter"}""")
             }
@@ -184,7 +185,10 @@ class ApiRoutingTest {
                 bearerAuth("test-token")
             }
             assertEquals(HttpStatusCode.OK, count.status)
-            assertEquals("""{"count":1}""", count.bodyAsText())
+            assertEquals(
+                """{"count":1,"guests":[{"userId":"guest","enteredAtMs":$enteredAtMs}]}""",
+                count.bodyAsText(),
+            )
 
             val adjustment = client.request("/admin/guest/balance") {
                 method = HttpMethod.Post
@@ -213,6 +217,7 @@ class ApiRoutingTest {
             }
             assertEquals(HttpStatusCode.OK, changes.status)
             assertTrue(changes.bodyAsText().contains("\"reason\":\"charge\""))
+            assertTrue(changes.bodyAsText().contains("\"type\":\"ADMIN_ADJUST\""))
 
             val bill = client.request("/guest/guest/bill") {
                 method = HttpMethod.Get
@@ -221,17 +226,41 @@ class ApiRoutingTest {
                 header("X-Request-Timestamp", System.currentTimeMillis())
             }
             assertEquals(HttpStatusCode.OK, bill.status)
-            assertTrue(bill.bodyAsText().contains("\"active\":true"))
+            assertTrue(bill.bodyAsText().contains("\"enteredAtMs\":$enteredAtMs"))
+            assertTrue(bill.bodyAsText().contains("\"periodCharges\":"))
 
+            val exitedAtMs = enteredAtMs + 1_000
             val logout = client.request("/guest/guest/logout") {
                 method = HttpMethod.Put
                 bearerAuth("test-token")
                 header("X-Operator-Id", "guest")
-                header("X-Request-Timestamp", System.currentTimeMillis())
+                header("X-Request-Timestamp", exitedAtMs)
                 contentType(ContentType.Application.Json)
                 setBody("""{"note":"leave"}""")
             }
-            assertEquals(HttpStatusCode.NoContent, logout.status)
+            assertEquals(HttpStatusCode.OK, logout.status)
+            assertEquals(
+                """{"userId":"guest","enteredAtMs":$enteredAtMs,"exitedAtMs":$exitedAtMs,"periodCharges":[{"startedAtMs":$enteredAtMs,"endedAtMs":$exitedAtMs,"amount":0}],"totalAmount":0,"remainingBalance":-500}""",
+                logout.bodyAsText(),
+            )
+
+            val duplicateLogout = client.request("/guest/guest/logout") {
+                method = HttpMethod.Put
+                bearerAuth("test-token")
+                header("X-Operator-Id", "guest")
+                header("X-Request-Timestamp", exitedAtMs + 1)
+                contentType(ContentType.Application.Json)
+                setBody("""{"note":"duplicate"}""")
+            }
+            assertEquals(HttpStatusCode.Conflict, duplicateLogout.status)
+
+            val inactiveBill = client.request("/guest/guest/bill") {
+                method = HttpMethod.Get
+                bearerAuth("test-token")
+                header("X-Operator-Id", "guest")
+                header("X-Request-Timestamp", exitedAtMs + 2)
+            }
+            assertEquals(HttpStatusCode.NoContent, inactiveBill.status)
         } finally {
             queue.shutdown()
         }

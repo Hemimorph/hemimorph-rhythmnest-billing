@@ -25,7 +25,26 @@ data class Bill(
     val active: Boolean,
     val enteredAtMs: Long?,
     val calculatedAtMs: Long,
+    val periodCharges: List<PeriodCharge>,
     val amount: Long,
+)
+
+data class Checkout(
+    val enteredAtMs: Long,
+    val exitedAtMs: Long,
+    val periodCharges: List<PeriodCharge>,
+    val totalAmount: Long,
+    val balanceAfter: Long,
+)
+
+data class LogoutResult(
+    val status: MutationResult,
+    val checkout: Checkout?,
+)
+
+data class ActiveGuest(
+    val userId: String,
+    val enteredAtMs: Long,
 )
 
 data class BalanceAdjustment(
@@ -53,6 +72,8 @@ enum class MutationResult {
 class OperationConflictException : IllegalStateException(
     "The operator already performed another operation in the same millisecond",
 )
+
+class GuestNotActiveException : IllegalStateException("Guest is not active")
 
 class BalanceOverflowException : ArithmeticException("Balance exceeds the supported integer range")
 
@@ -114,7 +135,7 @@ suspend fun DatabaseQueue.logout(
     operatorId: String,
     note: String,
     requestedAtMs: Long,
-): MutationResult = write {
+): LogoutResult = write {
     if (!canOperateGuest(operatorId, targetId)) {
         insertOperation(
             requestedAtMs,
@@ -124,18 +145,19 @@ suspend fun DatabaseQueue.logout(
             false,
             deniedNote("NOT_SELF_OR_ADMIN", note),
         )
-        return@write MutationResult.DENIED_PERMISSION
+        return@write LogoutResult(MutationResult.DENIED_PERMISSION, null)
     }
     val existing = ActiveGuests.selectAll()
         .where { ActiveGuests.userId eq targetId }
         .singleOrNull()
     if (existing == null) {
-        MutationResult.NO_CHANGE
+        LogoutResult(MutationResult.NO_CHANGE, null)
     } else {
         val periods = loadRates()
         if (periods.isEmpty()) throw RateConfigurationNotFoundException()
-        val bill = calculateBill(
-            enteredAtMs = existing[ActiveGuests.enteredAtMs],
+        val enteredAtMs = existing[ActiveGuests.enteredAtMs]
+        val bill = calculateBillBreakdown(
+            enteredAtMs = enteredAtMs,
             calculatedAtMs = requestedAtMs,
             periods = periods,
             zoneId = zoneId,
@@ -145,7 +167,7 @@ suspend fun DatabaseQueue.logout(
             .singleOrNull()
         val currentBalance = balanceRow?.get(Balances.amountMinor) ?: 0L
         val balanceAfter = try {
-            Math.subtractExact(currentBalance, bill)
+            Math.subtractExact(currentBalance, bill.totalAmount)
         } catch (_: ArithmeticException) {
             throw BalanceOverflowException()
         }
@@ -164,16 +186,39 @@ suspend fun DatabaseQueue.logout(
             requestedAtMs = requestedAtMs,
             operatorId = operatorId,
             targetId = targetId,
-            bill = bill,
+            bill = bill.totalAmount,
             balanceAfter = balanceAfter,
             note = note,
         )
-        MutationResult.APPLIED
+        LogoutResult(
+            status = MutationResult.APPLIED,
+            checkout = Checkout(
+                enteredAtMs = enteredAtMs,
+                exitedAtMs = requestedAtMs,
+                periodCharges = bill.periodCharges,
+                totalAmount = bill.totalAmount,
+                balanceAfter = balanceAfter,
+            ),
+        )
     }
 }
 
 suspend fun DatabaseQueue.guestCount(): Long = execute {
     ActiveGuests.selectAll().count()
+}
+
+suspend fun DatabaseQueue.activeGuests(): List<ActiveGuest> = execute {
+    ActiveGuests.selectAll()
+        .orderBy(
+            ActiveGuests.enteredAtMs to SortOrder.ASC,
+            ActiveGuests.userId to SortOrder.ASC,
+        )
+        .map { row ->
+            ActiveGuest(
+                userId = row[ActiveGuests.userId],
+                enteredAtMs = row[ActiveGuests.enteredAtMs],
+            )
+        }
 }
 
 suspend fun DatabaseQueue.balance(
@@ -209,7 +254,7 @@ suspend fun DatabaseQueue.balanceChanges(
             (Operations.targetId eq targetId) and
                 (Operations.allowed eq true) and
                 (
-                    (Operations.type eq OperationType.BALANCE_ADJUST) or
+                    (Operations.type eq OperationType.ADMIN_ADJUST) or
                         (Operations.type eq OperationType.LOGOUT)
                     ) and
                 (Operations.deltaMinor neq 0L)
@@ -252,18 +297,20 @@ suspend fun DatabaseQueue.bill(
         .where { ActiveGuests.userId eq targetId }
         .singleOrNull()
     if (active == null) {
-        AccessResult(true, Bill(false, null, calculatedAtMs, 0))
+        AccessResult(true, Bill(false, null, calculatedAtMs, emptyList(), 0))
     } else {
         val periods = loadRates()
         if (periods.isEmpty()) throw RateConfigurationNotFoundException()
         val enteredAtMs = active[ActiveGuests.enteredAtMs]
+        val calculation = calculateBillBreakdown(enteredAtMs, calculatedAtMs, periods, zoneId)
         AccessResult(
             true,
             Bill(
                 active = true,
                 enteredAtMs = enteredAtMs,
                 calculatedAtMs = calculatedAtMs,
-                amount = calculateBill(enteredAtMs, calculatedAtMs, periods, zoneId),
+                periodCharges = calculation.periodCharges,
+                amount = calculation.totalAmount,
             ),
         )
     }
@@ -382,7 +429,7 @@ private fun JdbcTransaction.insertBalanceOperation(
         it[Operations.processedAtMs] = System.currentTimeMillis()
         it[Operations.operatorId] = operatorId
         it[Operations.targetId] = targetId
-        it[type] = OperationType.BALANCE_ADJUST
+        it[type] = OperationType.ADMIN_ADJUST
         it[Operations.allowed] = allowed
         it[note] = reason
         it[deltaMinor] = delta

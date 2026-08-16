@@ -13,7 +13,10 @@ import org.flywaydb.core.Flyway
 import org.jetbrains.exposed.v1.jdbc.Database
 import org.jetbrains.exposed.v1.jdbc.JdbcTransaction
 import org.jetbrains.exposed.v1.jdbc.transactions.transaction
+import org.slf4j.LoggerFactory
 import java.time.ZoneId
+import java.util.concurrent.atomic.AtomicLong
+import kotlin.time.Duration.Companion.nanoseconds
 
 data class DatabaseSettings(
     val jdbcUrl: String,
@@ -37,10 +40,14 @@ class DatabaseQueue internal constructor(
     internal val zoneId: ZoneId = ZoneId.systemDefault(),
 ) {
     private class Task<T>(
+        val id: Long,
+        val queuedAtNanos: Long,
         val block: JdbcTransaction.() -> T,
         val result: CompletableDeferred<T>,
     )
 
+    private val logger = LoggerFactory.getLogger(DatabaseQueue::class.java)
+    private val transactionSequence = AtomicLong()
     private val tasks = Channel<Task<*>>(Channel.UNLIMITED)
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val worker = scope.launch {
@@ -50,8 +57,10 @@ class DatabaseQueue internal constructor(
     }
 
     suspend fun <T> execute(block: JdbcTransaction.() -> T): T {
+        val transactionId = transactionSequence.incrementAndGet()
         val result = CompletableDeferred<T>()
-        tasks.send(Task(block, result))
+        logger.info("Database transaction queued transactionId={}", transactionId)
+        tasks.send(Task(transactionId, System.nanoTime(), block, result))
         return result.await()
     }
 
@@ -62,9 +71,27 @@ class DatabaseQueue internal constructor(
     }
 
     private fun <T> executeTask(database: Database, task: Task<T>) {
+        val startedAtNanos = System.nanoTime()
+        logger.info(
+            "Database transaction started transactionId={} queueWaitMs={}",
+            task.id,
+            (startedAtNanos - task.queuedAtNanos).nanoseconds.inWholeMilliseconds,
+        )
         try {
-            task.result.complete(transaction(database) { task.block(this) })
+            val value = transaction(database) { task.block(this) }
+            logger.info(
+                "Database transaction committed transactionId={} durationMs={}",
+                task.id,
+                (System.nanoTime() - startedAtNanos).nanoseconds.inWholeMilliseconds,
+            )
+            task.result.complete(value)
         } catch (failure: Throwable) {
+            logger.error(
+                "Database transaction rolled back transactionId={} durationMs={} failureType={}",
+                task.id,
+                (System.nanoTime() - startedAtNanos).nanoseconds.inWholeMilliseconds,
+                failure::class.qualifiedName,
+            )
             task.result.completeExceptionally(failure)
         }
     }

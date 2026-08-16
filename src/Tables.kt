@@ -1,13 +1,15 @@
 package io.github.hemimogph
 
+import kotlinx.serialization.Serializable
 import org.jetbrains.exposed.v1.core.Table
 
+@Serializable
 enum class OperationType {
     LOGIN,
     LOGOUT,
     ADMIN_ADD,
     ADMIN_REMOVE,
-    BALANCE_ADJUST,
+    ADMIN_ADJUST,
     BALANCE_QUERY,
     CHANGES_QUERY,
     BILL_QUERY,

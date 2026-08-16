@@ -38,3 +38,7 @@ Thumbs.db
 
 /kotlin
 /kotlin.bat
+
+/gradlew
+/gradlew.bat
+/gradle/wrapper/gradle-wrapper.jar

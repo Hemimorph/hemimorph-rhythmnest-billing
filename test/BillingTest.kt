@@ -18,8 +18,8 @@ class BillingTest {
         assertEquals(MutationResult.NO_CHANGE, queue.login("guest", "guest", "duplicate", 1_001))
         assertEquals(1, queue.guestCount())
 
-        assertEquals(MutationResult.APPLIED, queue.logout("guest", "guest", "leave", 1_002))
-        assertEquals(MutationResult.NO_CHANGE, queue.logout("guest", "guest", "duplicate", 1_003))
+        assertEquals(MutationResult.APPLIED, queue.logout("guest", "guest", "leave", 1_002).status)
+        assertEquals(MutationResult.NO_CHANGE, queue.logout("guest", "guest", "duplicate", 1_003).status)
         assertEquals(0, queue.guestCount())
 
         val operations = queue.execute {
@@ -214,7 +214,7 @@ class BillingTest {
 
         assertEquals(
             MutationResult.APPLIED,
-            queue.logout("guest", "guest", "settlement", calculatedAt),
+            queue.logout("guest", "guest", "settlement", calculatedAt).status,
         )
         assertEquals(-200, queue.balance("guest", "guest", calculatedAt + 1).value)
         val changes = checkNotNull(queue.balanceChanges("guest", "guest", -1, calculatedAt + 2).value)

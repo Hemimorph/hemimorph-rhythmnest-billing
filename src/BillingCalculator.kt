@@ -15,6 +15,17 @@ data class RatePeriod(
     val maxAmount: Long,
 )
 
+data class PeriodCharge(
+    val startedAtMs: Long,
+    val endedAtMs: Long,
+    val amount: Long,
+)
+
+data class BillCalculation(
+    val periodCharges: List<PeriodCharge>,
+    val totalAmount: Long,
+)
+
 class RateValidationException(message: String) : IllegalArgumentException(message)
 
 class RateConfigurationNotFoundException : IllegalStateException("Rate configuration not found")
@@ -93,16 +104,24 @@ fun calculateBill(
     calculatedAtMs: Long,
     periods: List<RatePeriod>,
     zoneId: ZoneId,
-): Long {
+): Long = calculateBillBreakdown(enteredAtMs, calculatedAtMs, periods, zoneId).totalAmount
+
+fun calculateBillBreakdown(
+    enteredAtMs: Long,
+    calculatedAtMs: Long,
+    periods: List<RatePeriod>,
+    zoneId: ZoneId,
+): BillCalculation {
     require(enteredAtMs >= 0) { "enteredAtMs must not be negative" }
     require(calculatedAtMs >= enteredAtMs) { "calculatedAtMs must not precede enteredAtMs" }
-    if (calculatedAtMs == enteredAtMs) return 0
+    if (calculatedAtMs == enteredAtMs) return BillCalculation(emptyList(), 0)
     val validatedPeriods = validateRatePeriods(periods)
 
     val firstDate = Instant.ofEpochMilli(enteredAtMs).atZone(zoneId).toLocalDate().minusDays(1)
     val lastDate = Instant.ofEpochMilli(calculatedAtMs).atZone(zoneId).toLocalDate()
     var date = firstDate
     var total = 0L
+    val charges = mutableListOf<PeriodCharge>()
     while (!date.isAfter(lastDate)) {
         validatedPeriods.forEach { period ->
             val durationMinutes = period.endMinute - period.startMinute
@@ -131,9 +150,10 @@ fun calculateBill(
                 } catch (_: ArithmeticException) {
                     throw BillingOverflowException()
                 }
+                charges += PeriodCharge(overlapStart, overlapEnd, periodAmount)
             }
         }
         date = date.plusDays(1)
     }
-    return total
+    return BillCalculation(charges, total)
 }

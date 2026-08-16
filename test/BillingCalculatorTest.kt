@@ -59,6 +59,17 @@ class BillingCalculatorTest {
         val calculated = utcMillis(2026, 1, 1, 18, 10)
 
         assertEquals(300, calculateBill(entered, calculated, listOf(day, night), ZoneOffset.UTC))
+
+        assertEquals(
+            BillCalculation(
+                periodCharges = listOf(
+                    PeriodCharge(entered, utcMillis(2026, 1, 1, 18, 0), 100),
+                    PeriodCharge(utcMillis(2026, 1, 1, 18, 0), calculated, 200),
+                ),
+                totalAmount = 300,
+            ),
+            calculateBillBreakdown(entered, calculated, listOf(day, night), ZoneOffset.UTC),
+        )
     }
 
     @Test

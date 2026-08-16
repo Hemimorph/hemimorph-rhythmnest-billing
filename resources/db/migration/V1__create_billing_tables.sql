@@ -43,7 +43,7 @@ CREATE TABLE operations (
             'LOGOUT',
             'ADMIN_ADD',
             'ADMIN_REMOVE',
-            'BALANCE_ADJUST',
+            'ADMIN_ADJUST',
             'BALANCE_QUERY',
             'CHANGES_QUERY',
             'BILL_QUERY',
@@ -53,7 +53,7 @@ CREATE TABLE operations (
     ),
     CONSTRAINT operations_balance_fields_check CHECK (
         (
-            type = 'BALANCE_ADJUST'
+            type = 'ADMIN_ADJUST'
             AND bill_minor IS NULL
             AND delta_minor IS NOT NULL
             AND delta_minor <> 0
@@ -70,7 +70,7 @@ CREATE TABLE operations (
         )
         OR
         (
-            NOT (type = 'BALANCE_ADJUST' OR (type = 'LOGOUT' AND allowed = TRUE))
+            NOT (type = 'ADMIN_ADJUST' OR (type = 'LOGOUT' AND allowed = TRUE))
             AND bill_minor IS NULL
             AND delta_minor IS NULL
             AND balance_after_minor IS NULL

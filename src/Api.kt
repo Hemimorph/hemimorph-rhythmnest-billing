@@ -7,6 +7,7 @@ import io.ktor.server.application.install
 import io.ktor.server.auth.Authentication
 import io.ktor.server.auth.UserIdPrincipal
 import io.ktor.server.auth.bearer
+import io.ktor.server.plugins.calllogging.CallLogging
 import io.ktor.server.plugins.BadRequestException
 import io.ktor.server.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.server.plugins.statuspages.StatusPages
@@ -14,6 +15,7 @@ import io.ktor.server.response.respond
 import io.ktor.server.routing.openapi.registerBearerAuthSecurityScheme
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import org.slf4j.event.Level
 import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
 
@@ -26,6 +28,9 @@ class ApiValidationException(message: String) : IllegalArgumentException(message
 
 fun Application.configureApi(apiToken: String) {
     registerBearerAuthSecurityScheme(API_AUTHENTICATION, "Billing API bearer token")
+    install(CallLogging) {
+        level = Level.INFO
+    }
     install(ContentNegotiation) {
         json(Json { ignoreUnknownKeys = false })
     }
@@ -46,6 +51,9 @@ fun Application.configureApi(apiToken: String) {
             call.respond(HttpStatusCode.BadRequest, ApiError("Invalid request body"))
         }
         exception<OperationConflictException> { call, cause ->
+            call.respond(HttpStatusCode.Conflict, ApiError(checkNotNull(cause.message)))
+        }
+        exception<GuestNotActiveException> { call, cause ->
             call.respond(HttpStatusCode.Conflict, ApiError(checkNotNull(cause.message)))
         }
         exception<BalanceOverflowException> { call, cause ->
