@@ -20,13 +20,13 @@ suspend fun DatabaseQueue.replaceRates(
     periods: List<RatePeriod>,
     operatorId: String,
     note: String,
-    occurredAtMs: Long,
+    requestedAtMs: Long,
 ): MutationResult {
     val validated = validateRatePeriods(periods)
     return write {
         if (!isAdministrator(operatorId)) {
             insertOperation(
-                occurredAtMs,
+                requestedAtMs,
                 operatorId,
                 "rates",
                 OperationType.RATE_UPDATE,
@@ -47,7 +47,7 @@ suspend fun DatabaseQueue.replaceRates(
             }
         }
         insertOperation(
-            occurredAtMs,
+            requestedAtMs,
             operatorId,
             "rates",
             OperationType.RATE_UPDATE,
@@ -60,11 +60,11 @@ suspend fun DatabaseQueue.replaceRates(
 
 suspend fun DatabaseQueue.debts(
     operatorId: String,
-    occurredAtMs: Long,
+    requestedAtMs: Long,
 ): AccessResult<List<Debt>> = write {
     if (!isAdministrator(operatorId)) {
         insertOperation(
-            occurredAtMs,
+            requestedAtMs,
             operatorId,
             "debts",
             OperationType.DEBTS_QUERY,

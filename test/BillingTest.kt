@@ -42,10 +42,10 @@ class BillingTest {
 
     @Test
     fun `operation conflict rolls back balance update`() = withDatabase { queue ->
-        queue.adjustBalance("guest", "admin", 100, "first", "event-1", 1_000)
+        queue.adjustBalance("guest", "admin", 100, "first", 1_000)
 
         assertFailsWith<OperationConflictException> {
-            queue.adjustBalance("guest", "admin", 200, "second", "event-2", 1_000)
+            queue.adjustBalance("guest", "admin", 200, "second", 1_000)
         }
         assertEquals(100, queue.balance("guest", "guest", 2_000).value)
         assertEquals(1, queue.balanceChanges("guest", "guest", -1, 2_001).value?.size)
@@ -106,8 +106,7 @@ class BillingTest {
             operatorId = "outsider",
             delta = 100,
             reason = "attempt",
-            idempotencyKey = "event-denied",
-            occurredAtMs = 1_001,
+            requestedAtMs = 1_001,
         )
         assertFalse(adjustment.allowed)
         assertEquals(0, queue.balance("guest", "guest", 1_002).value)
@@ -131,38 +130,25 @@ class BillingTest {
     }
 
     @Test
-    fun `balance adjustment is signed idempotent and recorded`() = withDatabase { queue ->
+    fun `balance adjustment is signed and recorded`() = withDatabase { queue ->
         val first = queue.adjustBalance(
             targetId = "guest",
             operatorId = "admin",
             delta = -500,
             reason = "charge",
-            idempotencyKey = "event-1",
-            occurredAtMs = 1_000,
-        )
-        val replay = queue.adjustBalance(
-            targetId = "guest",
-            operatorId = "admin",
-            delta = -500,
-            reason = "charge",
-            idempotencyKey = "event-1",
-            occurredAtMs = 2_000,
+            requestedAtMs = 1_000,
         )
 
-        assertEquals(first, replay)
+        assertEquals(-500, first.balanceAfter)
+        assertEquals(1_000, first.requestedAtMs)
+        val processedAtMs = queue.execute {
+            Operations.selectAll()
+                .where { Operations.requestedAtMs eq 1_000L }
+                .single()[Operations.processedAtMs]
+        }
+        assertTrue(processedAtMs > first.requestedAtMs)
         assertEquals(-500, queue.balance("guest", "guest", 2_001).value)
         assertEquals(1, queue.balanceChanges("guest", "guest", -1, 2_002).value?.size)
-
-        assertFailsWith<IdempotencyConflictException> {
-            queue.adjustBalance(
-                targetId = "guest",
-                operatorId = "admin",
-                delta = 100,
-                reason = "different",
-                idempotencyKey = "event-1",
-                occurredAtMs = 3_000,
-            )
-        }
     }
 
     @Test
@@ -173,8 +159,7 @@ class BillingTest {
                 operatorId = "admin",
                 delta = 100,
                 reason = "change-$index",
-                idempotencyKey = "event-$index",
-                occurredAtMs = 1_000L + index,
+                requestedAtMs = 1_000L + index,
             )
         }
 
@@ -189,7 +174,7 @@ class BillingTest {
 
     @Test
     fun `negative balance prevents self and administrator login`() = withDatabase { queue ->
-        queue.adjustBalance("guest", "admin", -100, "debt", "debt-1", 1_000)
+        queue.adjustBalance("guest", "admin", -100, "debt", 1_000)
 
         assertEquals(
             MutationResult.DENIED_NEGATIVE_BALANCE,
@@ -217,7 +202,7 @@ class BillingTest {
             periods = listOf(RatePeriod(0, 1440, 100, -1)),
             operatorId = "admin",
             note = "rate",
-            occurredAtMs = 1_000,
+            requestedAtMs = 1_000,
         )
         val enteredAt = utcMillis(2026, 1, 1, 10, 0)
         val calculatedAt = enteredAt + 30 * 60 * 1000 + 1
@@ -265,7 +250,7 @@ class BillingTest {
         )
         assertEquals(period, queue.rates())
 
-        queue.adjustBalance("guest", "admin", -100, "debt", "debt-1", 1_002)
+        queue.adjustBalance("guest", "admin", -100, "debt", 1_002)
         assertFalse(queue.debts("outsider", 1_003).allowed)
         val debts = checkNotNull(queue.debts("admin", 1_004).value)
         assertEquals(listOf(Debt("guest", -100)), debts)

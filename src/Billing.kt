@@ -13,7 +13,7 @@ import org.jetbrains.exposed.v1.jdbc.update
 import java.sql.SQLException
 
 data class BalanceChange(
-    val occurredAtMs: Long,
+    val requestedAtMs: Long,
     val operatorId: String,
     val type: OperationType,
     val delta: Long,
@@ -29,7 +29,7 @@ data class Bill(
 )
 
 data class BalanceAdjustment(
-    val occurredAtMs: Long,
+    val requestedAtMs: Long,
     val operatorId: String,
     val targetId: String,
     val delta: Long,
@@ -54,10 +54,6 @@ class OperationConflictException : IllegalStateException(
     "The operator already performed another operation in the same millisecond",
 )
 
-class IdempotencyConflictException : IllegalStateException(
-    "Idempotency-Key was already used for a different request",
-)
-
 class BalanceOverflowException : ArithmeticException("Balance exceeds the supported integer range")
 
 class PermissionDeniedException : IllegalStateException("Operator is not allowed to perform this operation")
@@ -68,11 +64,11 @@ suspend fun DatabaseQueue.login(
     targetId: String,
     operatorId: String,
     note: String,
-    occurredAtMs: Long,
+    requestedAtMs: Long,
 ): MutationResult = write {
     if (!canOperateGuest(operatorId, targetId)) {
         insertOperation(
-            occurredAtMs,
+            requestedAtMs,
             operatorId,
             targetId,
             OperationType.LOGIN,
@@ -94,7 +90,7 @@ suspend fun DatabaseQueue.login(
             ?: 0L
         if (balance < 0) {
             insertOperation(
-                occurredAtMs,
+                requestedAtMs,
                 operatorId,
                 targetId,
                 OperationType.LOGIN,
@@ -106,9 +102,9 @@ suspend fun DatabaseQueue.login(
         ensureBalance(targetId)
         ActiveGuests.insert {
             it[userId] = targetId
-            it[enteredAtMs] = occurredAtMs
+            it[enteredAtMs] = requestedAtMs
         }
-        insertOperation(occurredAtMs, operatorId, targetId, OperationType.LOGIN, true, note)
+        insertOperation(requestedAtMs, operatorId, targetId, OperationType.LOGIN, true, note)
         MutationResult.APPLIED
     }
 }
@@ -117,11 +113,11 @@ suspend fun DatabaseQueue.logout(
     targetId: String,
     operatorId: String,
     note: String,
-    occurredAtMs: Long,
+    requestedAtMs: Long,
 ): MutationResult = write {
     if (!canOperateGuest(operatorId, targetId)) {
         insertOperation(
-            occurredAtMs,
+            requestedAtMs,
             operatorId,
             targetId,
             OperationType.LOGOUT,
@@ -140,7 +136,7 @@ suspend fun DatabaseQueue.logout(
         if (periods.isEmpty()) throw RateConfigurationNotFoundException()
         val bill = calculateBill(
             enteredAtMs = existing[ActiveGuests.enteredAtMs],
-            calculatedAtMs = occurredAtMs,
+            calculatedAtMs = requestedAtMs,
             periods = periods,
             zoneId = zoneId,
         )
@@ -165,7 +161,7 @@ suspend fun DatabaseQueue.logout(
         }
         ActiveGuests.deleteWhere { ActiveGuests.userId eq targetId }
         insertLogoutOperation(
-            occurredAtMs = occurredAtMs,
+            requestedAtMs = requestedAtMs,
             operatorId = operatorId,
             targetId = targetId,
             bill = bill,
@@ -183,10 +179,10 @@ suspend fun DatabaseQueue.guestCount(): Long = execute {
 suspend fun DatabaseQueue.balance(
     targetId: String,
     operatorId: String,
-    occurredAtMs: Long,
+    requestedAtMs: Long,
 ): AccessResult<Long> = write {
     if (!canOperateGuest(operatorId, targetId)) {
-        insertOperation(occurredAtMs, operatorId, targetId, OperationType.BALANCE_QUERY, false, "NOT_SELF_OR_ADMIN")
+        insertOperation(requestedAtMs, operatorId, targetId, OperationType.BALANCE_QUERY, false, "NOT_SELF_OR_ADMIN")
         AccessResult(false, null)
     } else {
         val balance = Balances.selectAll()
@@ -202,10 +198,10 @@ suspend fun DatabaseQueue.balanceChanges(
     targetId: String,
     operatorId: String,
     limit: Int,
-    occurredAtMs: Long,
+    requestedAtMs: Long,
 ): AccessResult<List<BalanceChange>> = write {
     if (!canOperateGuest(operatorId, targetId)) {
-        insertOperation(occurredAtMs, operatorId, targetId, OperationType.CHANGES_QUERY, false, "NOT_SELF_OR_ADMIN")
+        insertOperation(requestedAtMs, operatorId, targetId, OperationType.CHANGES_QUERY, false, "NOT_SELF_OR_ADMIN")
         return@write AccessResult(false, null)
     }
     val query = Operations.selectAll()
@@ -219,13 +215,13 @@ suspend fun DatabaseQueue.balanceChanges(
                 (Operations.deltaMinor neq 0L)
         }
         .orderBy(
-            Operations.occurredAtMs to SortOrder.DESC,
+            Operations.requestedAtMs to SortOrder.DESC,
             Operations.operatorId to SortOrder.DESC,
         )
     if (limit != -1) query.limit(limit)
     val changes = query.map { row ->
         BalanceChange(
-            occurredAtMs = row[Operations.occurredAtMs],
+            requestedAtMs = row[Operations.requestedAtMs],
             operatorId = row[Operations.operatorId],
             type = row[Operations.type],
             delta = checkNotNull(row[Operations.deltaMinor]),
@@ -278,86 +274,67 @@ suspend fun DatabaseQueue.adjustBalance(
     operatorId: String,
     delta: Long,
     reason: String,
-    idempotencyKey: String,
-    occurredAtMs: Long,
+    requestedAtMs: Long,
 ): BalanceAdjustment = write {
-    val previous = Operations.selectAll()
-        .where { Operations.idempotencyKey eq idempotencyKey }
+    val balanceRow = Balances.selectAll()
+        .where { Balances.userId eq targetId }
         .singleOrNull()
-    if (previous != null) {
-        val expectedReason = if (previous[Operations.allowed]) reason else deniedNote("NOT_ADMIN", reason)
-        if (
-            previous[Operations.targetId] != targetId ||
-            previous[Operations.operatorId] != operatorId ||
-            previous[Operations.deltaMinor] != delta ||
-            previous[Operations.note] != expectedReason
-        ) {
-            throw IdempotencyConflictException()
-        }
-        previous.toBalanceAdjustment()
-    } else {
-        val balanceRow = Balances.selectAll()
-            .where { Balances.userId eq targetId }
-            .singleOrNull()
-        val currentBalance = balanceRow?.get(Balances.amountMinor) ?: 0L
-        if (!isAdministrator(operatorId)) {
-            val deniedReason = deniedNote("NOT_ADMIN", reason)
-            insertBalanceOperation(
-                occurredAtMs = occurredAtMs,
-                operatorId = operatorId,
-                targetId = targetId,
-                delta = delta,
-                balanceAfter = currentBalance,
-                reason = deniedReason,
-                idempotencyKey = idempotencyKey,
-                allowed = false,
-            )
-            return@write BalanceAdjustment(
-                occurredAtMs = occurredAtMs,
-                operatorId = operatorId,
-                targetId = targetId,
-                delta = delta,
-                balanceAfter = currentBalance,
-                reason = deniedReason,
-                allowed = false,
-            )
-        }
-        val balanceAfter = try {
-            Math.addExact(currentBalance, delta)
-        } catch (_: ArithmeticException) {
-            throw BalanceOverflowException()
-        }
-
-        if (balanceRow == null) {
-            Balances.insert {
-                it[userId] = targetId
-                it[amountMinor] = balanceAfter
-            }
-        } else {
-            Balances.update({ Balances.userId eq targetId }) {
-                it[amountMinor] = balanceAfter
-            }
-        }
+    val currentBalance = balanceRow?.get(Balances.amountMinor) ?: 0L
+    if (!isAdministrator(operatorId)) {
+        val deniedReason = deniedNote("NOT_ADMIN", reason)
         insertBalanceOperation(
-            occurredAtMs = occurredAtMs,
+            requestedAtMs = requestedAtMs,
             operatorId = operatorId,
             targetId = targetId,
             delta = delta,
-            balanceAfter = balanceAfter,
-            reason = reason,
-            idempotencyKey = idempotencyKey,
-            allowed = true,
+            balanceAfter = currentBalance,
+            reason = deniedReason,
+            allowed = false,
         )
-        BalanceAdjustment(
-            occurredAtMs = occurredAtMs,
+        return@write BalanceAdjustment(
+            requestedAtMs = requestedAtMs,
             operatorId = operatorId,
             targetId = targetId,
             delta = delta,
-            balanceAfter = balanceAfter,
-            reason = reason,
-            allowed = true,
+            balanceAfter = currentBalance,
+            reason = deniedReason,
+            allowed = false,
         )
     }
+    val balanceAfter = try {
+        Math.addExact(currentBalance, delta)
+    } catch (_: ArithmeticException) {
+        throw BalanceOverflowException()
+    }
+
+    if (balanceRow == null) {
+        Balances.insert {
+            it[userId] = targetId
+            it[amountMinor] = balanceAfter
+        }
+    } else {
+        Balances.update({ Balances.userId eq targetId }) {
+            it[amountMinor] = balanceAfter
+        }
+    }
+    insertBalanceOperation(
+        requestedAtMs = requestedAtMs,
+        operatorId = operatorId,
+        targetId = targetId,
+        delta = delta,
+        balanceAfter = balanceAfter,
+        reason = reason,
+        allowed = true,
+    )
+    BalanceAdjustment(
+        requestedAtMs = requestedAtMs,
+        operatorId = operatorId,
+        targetId = targetId,
+        delta = delta,
+        balanceAfter = balanceAfter,
+        reason = reason,
+        allowed = true,
+    )
 }
 
 private fun JdbcTransaction.ensureBalance(targetId: String) {
@@ -373,7 +350,7 @@ private fun JdbcTransaction.ensureBalance(targetId: String) {
 }
 
 internal fun JdbcTransaction.insertOperation(
-    occurredAtMs: Long,
+    requestedAtMs: Long,
     operatorId: String,
     targetId: String,
     type: OperationType,
@@ -381,7 +358,8 @@ internal fun JdbcTransaction.insertOperation(
     note: String,
 ) {
     Operations.insert {
-        it[Operations.occurredAtMs] = occurredAtMs
+        it[Operations.requestedAtMs] = requestedAtMs
+        it[Operations.processedAtMs] = System.currentTimeMillis()
         it[Operations.operatorId] = operatorId
         it[Operations.targetId] = targetId
         it[Operations.type] = type
@@ -391,17 +369,17 @@ internal fun JdbcTransaction.insertOperation(
 }
 
 private fun JdbcTransaction.insertBalanceOperation(
-    occurredAtMs: Long,
+    requestedAtMs: Long,
     operatorId: String,
     targetId: String,
     delta: Long,
     balanceAfter: Long,
     reason: String,
-    idempotencyKey: String,
     allowed: Boolean,
-) {
+): Unit {
     Operations.insert {
-        it[Operations.occurredAtMs] = occurredAtMs
+        it[Operations.requestedAtMs] = requestedAtMs
+        it[Operations.processedAtMs] = System.currentTimeMillis()
         it[Operations.operatorId] = operatorId
         it[Operations.targetId] = targetId
         it[type] = OperationType.BALANCE_ADJUST
@@ -409,12 +387,11 @@ private fun JdbcTransaction.insertBalanceOperation(
         it[note] = reason
         it[deltaMinor] = delta
         it[Operations.balanceAfterMinor] = balanceAfter
-        it[Operations.idempotencyKey] = idempotencyKey
     }
 }
 
 private fun JdbcTransaction.insertLogoutOperation(
-    occurredAtMs: Long,
+    requestedAtMs: Long,
     operatorId: String,
     targetId: String,
     bill: Long,
@@ -422,7 +399,8 @@ private fun JdbcTransaction.insertLogoutOperation(
     note: String,
 ) {
     Operations.insert {
-        it[Operations.occurredAtMs] = occurredAtMs
+        it[Operations.requestedAtMs] = requestedAtMs
+        it[Operations.processedAtMs] = System.currentTimeMillis()
         it[Operations.operatorId] = operatorId
         it[Operations.targetId] = targetId
         it[type] = OperationType.LOGOUT
@@ -436,17 +414,6 @@ private fun JdbcTransaction.insertLogoutOperation(
 
 private fun JdbcTransaction.canOperateGuest(operatorId: String, targetId: String): Boolean =
     operatorId == targetId || isAdministrator(operatorId)
-
-private fun org.jetbrains.exposed.v1.core.ResultRow.toBalanceAdjustment(): BalanceAdjustment =
-    BalanceAdjustment(
-        occurredAtMs = this[Operations.occurredAtMs],
-        operatorId = this[Operations.operatorId],
-        targetId = this[Operations.targetId],
-        delta = checkNotNull(this[Operations.deltaMinor]),
-        balanceAfter = checkNotNull(this[Operations.balanceAfterMinor]),
-        reason = this[Operations.note],
-        allowed = this[Operations.allowed],
-    )
 
 internal suspend fun <T> DatabaseQueue.write(block: JdbcTransaction.() -> T): T =
     try {

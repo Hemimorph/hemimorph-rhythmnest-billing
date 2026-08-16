@@ -10,11 +10,11 @@ suspend fun DatabaseQueue.addAdministrator(
     targetId: String,
     operatorId: String,
     note: String,
-    occurredAtMs: Long,
+    requestedAtMs: Long,
 ): MutationResult = write {
     if (!isAdministrator(operatorId)) {
         insertOperation(
-            occurredAtMs,
+            requestedAtMs,
             operatorId,
             targetId,
             OperationType.ADMIN_ADD,
@@ -30,7 +30,7 @@ suspend fun DatabaseQueue.addAdministrator(
         MutationResult.NO_CHANGE
     } else {
         Administrators.insert { it[userId] = targetId }
-        insertOperation(occurredAtMs, operatorId, targetId, OperationType.ADMIN_ADD, true, note)
+        insertOperation(requestedAtMs, operatorId, targetId, OperationType.ADMIN_ADD, true, note)
         MutationResult.APPLIED
     }
 }
@@ -39,11 +39,11 @@ suspend fun DatabaseQueue.deleteAdministrator(
     targetId: String,
     operatorId: String,
     note: String,
-    occurredAtMs: Long,
+    requestedAtMs: Long,
 ): MutationResult = write {
     if (!isAdministrator(operatorId)) {
         insertOperation(
-            occurredAtMs,
+            requestedAtMs,
             operatorId,
             targetId,
             OperationType.ADMIN_REMOVE,
@@ -59,7 +59,7 @@ suspend fun DatabaseQueue.deleteAdministrator(
         MutationResult.NO_CHANGE
     } else {
         Administrators.deleteWhere { Administrators.userId eq targetId }
-        insertOperation(occurredAtMs, operatorId, targetId, OperationType.ADMIN_REMOVE, true, note)
+        insertOperation(requestedAtMs, operatorId, targetId, OperationType.ADMIN_REMOVE, true, note)
         MutationResult.APPLIED
     }
 }

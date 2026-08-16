@@ -25,6 +25,20 @@ sourceSets {
     }
 }
 
+val openApiSourceSet = sourceSets.create("openApi") {
+    compileClasspath += sourceSets.main.get().output
+    runtimeClasspath += sourceSets.main.get().output
+}
+
+kotlin.sourceSets.named("openApi") {
+    kotlin.srcDir("openapi")
+}
+
+configurations[openApiSourceSet.implementationConfigurationName]
+    .extendsFrom(configurations.implementation.get())
+configurations[openApiSourceSet.runtimeOnlyConfigurationName]
+    .extendsFrom(configurations.runtimeOnly.get())
+
 application {
     applicationName = "rhythmnest-billing"
     mainClass = "io.github.hemimogph.MainKt"
@@ -51,8 +65,27 @@ dependencies {
     testImplementation(kotlin("test"))
     testImplementation("io.ktor:ktor-server-test-host")
     testImplementation(libs.h2)
+    add(openApiSourceSet.implementationConfigurationName, "io.ktor:ktor-server-test-host")
 }
 
 tasks.test {
     useJUnitPlatform()
+}
+
+val openApiOutput = layout.buildDirectory.file("openapi/openapi.json")
+
+val generateOpenApi by tasks.registering(JavaExec::class) {
+    group = "documentation"
+    description = "Generates the OpenAPI JSON document"
+    dependsOn(openApiSourceSet.classesTaskName)
+    classpath = openApiSourceSet.runtimeClasspath
+    mainClass = "io.github.hemimogph.OpenApiGeneratorKt"
+    doFirst {
+        args(openApiOutput.get().asFile.absolutePath)
+    }
+    outputs.file(openApiOutput)
+}
+
+tasks.build {
+    dependsOn(generateOpenApi)
 }

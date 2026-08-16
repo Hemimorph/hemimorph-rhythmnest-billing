@@ -45,7 +45,8 @@ internal object Rates : Table("rates") {
 }
 
 internal object Operations : Table("operations") {
-    val occurredAtMs = long("occurred_at_ms")
+    val requestedAtMs = long("requested_at_ms")
+    val processedAtMs = long("processed_at_ms")
     val operatorId = varchar("operator_id", 128)
     val targetId = varchar("target_id", 128)
     val type = enumerationByName<OperationType>("type", 32)
@@ -54,11 +55,6 @@ internal object Operations : Table("operations") {
     val billMinor = long("bill_minor").nullable()
     val deltaMinor = long("delta_minor").nullable()
     val balanceAfterMinor = long("balance_after_minor").nullable()
-    val idempotencyKey = varchar("idempotency_key", 128).nullable()
 
-    override val primaryKey = PrimaryKey(occurredAtMs, operatorId)
-
-    init {
-        idempotencyKey.uniqueIndex()
-    }
+    override val primaryKey = PrimaryKey(requestedAtMs, operatorId)
 }

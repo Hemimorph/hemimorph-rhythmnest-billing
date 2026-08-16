@@ -82,12 +82,20 @@ The server requires `HERMIMORPH_BILL_HOST`, `HERMIMORPH_BILL_PORT`, `HERMIMORPH_
 
 Exposed operations must be submitted through the application-wide `DatabaseQueue`. A single worker executes transactions in queue order, and HikariCP maintains one PostgreSQL connection. This ordering guarantee only applies to a single running application instance.
 
+Authenticated operations that identify an operator require an
+`X-Request-Timestamp` header. Its value is the request instant as Unix epoch
+milliseconds (UTC) and must be within 60 seconds of the server's receive time.
+The server stores this request time separately from its processing time. For
+billing, epoch instants are converted into the server's configured local time
+zone before matching rate periods; clients must not encode a local wall-clock
+time as a Unix timestamp.
+
 ## OpenAPI
 
 Generate the OpenAPI 3.1 document during the build process:
 
 ```shell
-gradle-project test --tests io.github.hemimogph.OpenApiGenerationTest.generateOpenApi
+gradle-project generateOpenApi
 ```
 
 The generated document is written to `build/openapi/openapi.json`. The application does not expose OpenAPI or Swagger endpoints at runtime.

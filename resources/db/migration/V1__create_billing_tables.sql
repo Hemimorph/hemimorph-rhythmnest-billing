@@ -26,7 +26,8 @@ CREATE TABLE rates (
 );
 
 CREATE TABLE operations (
-    occurred_at_ms BIGINT NOT NULL CHECK (occurred_at_ms >= 0),
+    requested_at_ms BIGINT NOT NULL CHECK (requested_at_ms >= 0),
+    processed_at_ms BIGINT NOT NULL CHECK (processed_at_ms >= 0),
     operator_id VARCHAR(128) NOT NULL,
     target_id VARCHAR(128) NOT NULL,
     type VARCHAR(32) NOT NULL,
@@ -35,8 +36,7 @@ CREATE TABLE operations (
     bill_minor BIGINT,
     delta_minor BIGINT,
     balance_after_minor BIGINT,
-    idempotency_key VARCHAR(128),
-    CONSTRAINT operations_pkey PRIMARY KEY (occurred_at_ms, operator_id),
+    CONSTRAINT operations_pkey PRIMARY KEY (requested_at_ms, operator_id),
     CONSTRAINT operations_type_check CHECK (
         type IN (
             'LOGIN',
@@ -58,7 +58,6 @@ CREATE TABLE operations (
             AND delta_minor IS NOT NULL
             AND delta_minor <> 0
             AND balance_after_minor IS NOT NULL
-            AND idempotency_key IS NOT NULL
         )
         OR
         (
@@ -68,7 +67,6 @@ CREATE TABLE operations (
             AND bill_minor >= 0
             AND delta_minor = -bill_minor
             AND balance_after_minor IS NOT NULL
-            AND idempotency_key IS NULL
         )
         OR
         (
@@ -76,17 +74,12 @@ CREATE TABLE operations (
             AND bill_minor IS NULL
             AND delta_minor IS NULL
             AND balance_after_minor IS NULL
-            AND idempotency_key IS NULL
         )
     )
 );
 
-CREATE UNIQUE INDEX operations_idempotency_key_uq
-    ON operations (idempotency_key)
-    WHERE idempotency_key IS NOT NULL;
-
 CREATE INDEX operations_balance_history_idx
-    ON operations (target_id, occurred_at_ms DESC, operator_id DESC)
+    ON operations (target_id, requested_at_ms DESC, operator_id DESC)
     WHERE allowed = TRUE AND delta_minor IS NOT NULL AND delta_minor <> 0;
 
 CREATE INDEX balances_debts_idx

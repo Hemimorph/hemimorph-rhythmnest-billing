@@ -10,30 +10,31 @@ import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.nio.file.Files
 import java.nio.file.Path
-import kotlin.test.Test
-import kotlin.test.assertTrue
 
 private val OpenApiJson = Json { prettyPrint = true }
 
-class OpenApiGenerationTest {
-    @Test
-    fun generateOpenApi() = testApplication {
+fun main(args: Array<String>) {
+    val output = Path.of(requireNotNull(args.singleOrNull()) { "OpenAPI output path is required" }).toAbsolutePath()
+    testApplication {
         application {
-            testRootModule("openapi-generation-token")
+            configureApi("openapi-generation-token")
+            configureRouting()
             val document = (
                 OpenApiDoc(info = OpenApiInfo("RhythmNest Billing API", "1.0.0")) +
                     routingRoot.descendants()
                 ) + findSecuritySchemesOrRefs()
             val content = OpenApiJson.encodeToString(document)
-            val output = Path.of("build", "openapi", "openapi.json")
+
+            check(document.paths.containsKey("/guest/{userId}/bill"))
+            check(document.paths.containsKey("/admin/rates"))
+            check(document.paths.containsKey("/admin/debts"))
+            check(content.contains("X-Operator-Id"))
+            check(content.contains("X-Request-Timestamp"))
+            check(!content.contains("processedAtMs"))
+            check(!content.contains("Idempotency-Key"))
+
             Files.createDirectories(output.parent)
             Files.writeString(output, content)
-
-            assertTrue(document.paths.containsKey("/guest/{userId}/bill"))
-            assertTrue(document.paths.containsKey("/admin/rates"))
-            assertTrue(document.paths.containsKey("/admin/debts"))
-            assertTrue(content.contains("X-Operator-Id"))
-            assertTrue(content.contains("Idempotency-Key"))
         }
         startApplication()
     }

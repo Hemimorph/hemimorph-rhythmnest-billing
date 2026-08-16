@@ -21,8 +21,9 @@ import io.ktor.server.routing.openapi.hide
 import io.ktor.utils.io.ExperimentalKtorApi
 import kotlinx.serialization.Serializable
 
-private const val IDEMPOTENCY_KEY = "Idempotency-Key"
 private const val OPERATOR_ID = "X-Operator-Id"
+private const val REQUEST_TIMESTAMP = "X-Request-Timestamp"
+private const val MAX_TIMESTAMP_DIFFERENCE_MS = 60_000L
 private const val DEFAULT_CHANGE_LIMIT = 5
 private const val MAX_IDENTIFIER_LENGTH = 128
 
@@ -60,7 +61,7 @@ private data class BalanceResponse(
 
 @Serializable
 private data class BalanceChangeResponse(
-    val occurredAtMs: Long,
+    val requestedAtMs: Long,
     val operatorId: String,
     val type: String,
     val delta: Long,
@@ -111,7 +112,7 @@ private data class BalanceChangesResponse(
 
 @Serializable
 private data class BalanceAdjustmentResponse(
-    val occurredAtMs: Long,
+    val requestedAtMs: Long,
     val operatorId: String,
     val userId: String,
     val delta: Long,
@@ -153,11 +154,11 @@ fun Application.configureRouting() {
                 }
                 route("/{userId}") {
                     put("/login") {
-                        val occurredAtMs = System.currentTimeMillis()
+                        val requestedAtMs = call.requireRequestTimestamp()
                         val userId = call.requireUserId()
                         val operatorId = call.requireOperatorId()
                         val request = call.receive<OperationRequest>().validated()
-                        databaseQueue.login(userId, operatorId, request.note, occurredAtMs).requireAllowed()
+                        databaseQueue.login(userId, operatorId, request.note, requestedAtMs).requireAllowed()
                     call.respond(HttpStatusCode.NoContent)
                     }.describe {
                         documentedOperation("Log in guest", "guest", userId = true, operatorId = true)
@@ -173,11 +174,11 @@ fun Application.configureRouting() {
                         )
                     }
                     put("/logout") {
-                        val occurredAtMs = System.currentTimeMillis()
+                        val requestedAtMs = call.requireRequestTimestamp()
                         val userId = call.requireUserId()
                         val operatorId = call.requireOperatorId()
                         val request = call.receive<OperationRequest>().validated()
-                        databaseQueue.logout(userId, operatorId, request.note, occurredAtMs).requireAllowed()
+                        databaseQueue.logout(userId, operatorId, request.note, requestedAtMs).requireAllowed()
                         call.respond(HttpStatusCode.NoContent)
                     }.describe {
                         documentedOperation("Log out and settle guest", "guest", userId = true, operatorId = true)
@@ -193,10 +194,10 @@ fun Application.configureRouting() {
                         )
                     }
                     get("/bill") {
-                        val calculatedAtMs = System.currentTimeMillis()
+                        val requestedAtMs = call.requireRequestTimestamp()
                         val userId = call.requireUserId()
                         val operatorId = call.requireOperatorId()
-                        val bill = databaseQueue.bill(userId, operatorId, calculatedAtMs).requireAllowed()
+                        val bill = databaseQueue.bill(userId, operatorId, requestedAtMs).requireAllowed()
                         call.respond(
                             BillResponse(
                                 userId = userId,
@@ -219,10 +220,10 @@ fun Application.configureRouting() {
                         )
                     }
                     get("/balance") {
-                        val occurredAtMs = System.currentTimeMillis()
+                        val requestedAtMs = call.requireRequestTimestamp()
                         val userId = call.requireUserId()
                         val operatorId = call.requireOperatorId()
-                        val result = databaseQueue.balance(userId, operatorId, occurredAtMs).requireAllowed()
+                        val result = databaseQueue.balance(userId, operatorId, requestedAtMs).requireAllowed()
                         call.respond(BalanceResponse(userId, result))
                     }.describe {
                         documentedOperation("Get guest balance", "guest", userId = true, operatorId = true)
@@ -236,7 +237,7 @@ fun Application.configureRouting() {
                         )
                     }
                     get("/changes") {
-                        val occurredAtMs = System.currentTimeMillis()
+                        val requestedAtMs = call.requireRequestTimestamp()
                         val userId = call.requireUserId()
                         val limit = parseChangesLimit(call.request.queryParameters["limit"])
                         val operatorId = call.requireOperatorId()
@@ -244,10 +245,10 @@ fun Application.configureRouting() {
                             userId,
                             operatorId,
                             limit,
-                            occurredAtMs,
+                            requestedAtMs,
                         ).requireAllowed().map { change ->
                             BalanceChangeResponse(
-                                occurredAtMs = change.occurredAtMs,
+                                requestedAtMs = change.requestedAtMs,
                                 operatorId = change.operatorId,
                                 type = change.type.name,
                                 delta = change.delta,
@@ -277,14 +278,14 @@ fun Application.configureRouting() {
             }
 
             put("/admin/rates") {
-                val occurredAtMs = System.currentTimeMillis()
+                val requestedAtMs = call.requireRequestTimestamp()
                 val operatorId = call.requireOperatorId()
                 val request = call.receive<RatesUpdateRequest>().validated()
                 databaseQueue.replaceRates(
                     periods = request.periods.map(RatePeriodRequest::toRatePeriod),
                     operatorId = operatorId,
                     note = request.note,
-                    occurredAtMs = occurredAtMs,
+                    requestedAtMs = requestedAtMs,
                 ).requireAllowed()
                 call.respond(HttpStatusCode.NoContent)
             }.describe {
@@ -301,9 +302,9 @@ fun Application.configureRouting() {
             }
 
             get("/admin/debts") {
-                val occurredAtMs = System.currentTimeMillis()
+                val requestedAtMs = call.requireRequestTimestamp()
                 val operatorId = call.requireOperatorId()
-                val debts = databaseQueue.debts(operatorId, occurredAtMs).requireAllowed()
+                val debts = databaseQueue.debts(operatorId, requestedAtMs).requireAllowed()
                 call.respond(
                     DebtsResponse(
                         count = debts.size,
@@ -324,7 +325,7 @@ fun Application.configureRouting() {
 
             route("/admin/{userId}") {
                 put {
-                    val occurredAtMs = System.currentTimeMillis()
+                    val requestedAtMs = call.requireRequestTimestamp()
                     val userId = call.requireUserId()
                     val operatorId = call.requireOperatorId()
                     val request = call.receive<OperationRequest>().validated()
@@ -332,7 +333,7 @@ fun Application.configureRouting() {
                         userId,
                         operatorId,
                         request.note,
-                        occurredAtMs,
+                        requestedAtMs,
                     ).requireAllowed()
                     call.respond(HttpStatusCode.NoContent)
                 }.describe {
@@ -348,7 +349,7 @@ fun Application.configureRouting() {
                     )
                 }
                 delete {
-                    val occurredAtMs = System.currentTimeMillis()
+                    val requestedAtMs = call.requireRequestTimestamp()
                     val userId = call.requireUserId()
                     val operatorId = call.requireOperatorId()
                     val request = call.receive<OperationRequest>().validated()
@@ -356,7 +357,7 @@ fun Application.configureRouting() {
                         userId,
                         operatorId,
                         request.note,
-                        occurredAtMs,
+                        requestedAtMs,
                     ).requireAllowed()
                     call.respond(HttpStatusCode.NoContent)
                 }.describe {
@@ -372,23 +373,21 @@ fun Application.configureRouting() {
                     )
                 }
                 post("/balance") {
-                    val occurredAtMs = System.currentTimeMillis()
+                    val requestedAtMs = call.requireRequestTimestamp()
                     val userId = call.requireUserId()
                     val operatorId = call.requireOperatorId()
-                    val idempotencyKey = call.requireIdempotencyKey()
                     val request = call.receive<BalanceAdjustmentRequest>().validated()
                     val adjustment = databaseQueue.adjustBalance(
                         targetId = userId,
                         operatorId = operatorId,
                         delta = request.delta,
                         reason = request.reason,
-                        idempotencyKey = idempotencyKey,
-                        occurredAtMs = occurredAtMs,
+                        requestedAtMs = requestedAtMs,
                     ).requireAllowed()
                     call.respond(
                         HttpStatusCode.Created,
                         BalanceAdjustmentResponse(
-                            occurredAtMs = adjustment.occurredAtMs,
+                            requestedAtMs = adjustment.requestedAtMs,
                             operatorId = adjustment.operatorId,
                             userId = adjustment.targetId,
                             delta = adjustment.delta,
@@ -402,7 +401,6 @@ fun Application.configureRouting() {
                         "admin",
                         userId = true,
                         operatorId = true,
-                        idempotencyKey = true,
                     )
                     jsonRequest<BalanceAdjustmentRequest>()
                     jsonResponses<BalanceAdjustmentResponse>(
@@ -424,7 +422,6 @@ private fun Operation.Builder.documentedOperation(
     operationTag: String,
     userId: Boolean = false,
     operatorId: Boolean = false,
-    idempotencyKey: Boolean = false,
     limit: Boolean = false,
 ) {
     summary = operationSummary
@@ -442,12 +439,10 @@ private fun Operation.Builder.documentedOperation(
                 required = true
                 schema = jsonSchema<String>()
             }
-        }
-        if (idempotencyKey) {
-            header(IDEMPOTENCY_KEY) {
-                description = "Unique key used to prevent duplicate balance adjustments"
+            header(REQUEST_TIMESTAMP) {
+                description = "Client request instant as Unix epoch milliseconds (UTC); must be within 60 seconds of server time. Billing maps this instant into the configured local time zone."
                 required = true
-                schema = jsonSchema<String>()
+                schema = jsonSchema<Long>()
             }
         }
         if (limit) {
@@ -515,11 +510,20 @@ internal fun parseChangesLimit(value: String?): Int {
 private fun ApplicationCall.requireUserId(): String =
     parameters["userId"].validatedIdentifier("userId")
 
-private fun ApplicationCall.requireIdempotencyKey(): String =
-    request.header(IDEMPOTENCY_KEY).validatedIdentifier(IDEMPOTENCY_KEY)
-
 private fun ApplicationCall.requireOperatorId(): String =
     request.header(OPERATOR_ID).validatedIdentifier(OPERATOR_ID)
+
+private fun ApplicationCall.requireRequestTimestamp(): Long {
+    val requestedAtMs = request.header(REQUEST_TIMESTAMP)?.toLongOrNull()
+        ?: throw ApiValidationException("$REQUEST_TIMESTAMP must be a Unix timestamp in milliseconds")
+    val receivedAtMs = System.currentTimeMillis()
+    if (requestedAtMs < receivedAtMs - MAX_TIMESTAMP_DIFFERENCE_MS ||
+        requestedAtMs > receivedAtMs + MAX_TIMESTAMP_DIFFERENCE_MS
+    ) {
+        throw ApiValidationException("$REQUEST_TIMESTAMP must be within 60 seconds of server time")
+    }
+    return requestedAtMs
+}
 
 private fun OperationRequest.validated(): OperationRequest = copy(
     note = note.trim(),

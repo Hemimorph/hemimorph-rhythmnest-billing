@@ -68,21 +68,6 @@ class ApiRoutingTest {
     }
 
     @Test
-    fun `requires idempotency key for balance adjustment`() = testApplication {
-        application { testRootModule("test-token") }
-
-        val response = client.request("/admin/user/balance") {
-            method = HttpMethod.Post
-            bearerAuth("test-token")
-            header("X-Operator-Id", "admin")
-            contentType(ContentType.Application.Json)
-            setBody("""{"delta":100,"reason":"test"}""")
-        }
-
-        assertEquals(HttpStatusCode.BadRequest, response.status)
-    }
-
-    @Test
     fun `rejects zero balance adjustment`() = testApplication {
         application { testRootModule("test-token") }
 
@@ -90,7 +75,7 @@ class ApiRoutingTest {
             method = HttpMethod.Post
             bearerAuth("test-token")
             header("X-Operator-Id", "admin")
-            header("Idempotency-Key", "event-1")
+            header("X-Request-Timestamp", System.currentTimeMillis())
             contentType(ContentType.Application.Json)
             setBody("""{"delta":0,"reason":"test"}""")
         }
@@ -106,7 +91,7 @@ class ApiRoutingTest {
             method = HttpMethod.Post
             bearerAuth("test-token")
             header("X-Operator-Id", "admin")
-            header("Idempotency-Key", "event-1")
+            header("X-Request-Timestamp", System.currentTimeMillis())
             contentType(ContentType.Application.Json)
             setBody("""{"delta":100,"reason":" "}""")
         }
@@ -121,9 +106,30 @@ class ApiRoutingTest {
         val response = client.request("/guest/user/balance") {
             method = HttpMethod.Get
             bearerAuth("test-token")
+            header("X-Request-Timestamp", System.currentTimeMillis())
         }
 
         assertEquals(HttpStatusCode.BadRequest, response.status)
+    }
+
+    @Test
+    fun `requires a current request timestamp`() = testApplication {
+        application { testRootModule("test-token") }
+
+        val missing = client.request("/guest/user/balance") {
+            method = HttpMethod.Get
+            bearerAuth("test-token")
+            header("X-Operator-Id", "user")
+        }
+        val stale = client.request("/guest/user/balance") {
+            method = HttpMethod.Get
+            bearerAuth("test-token")
+            header("X-Operator-Id", "user")
+            header("X-Request-Timestamp", System.currentTimeMillis() - 60_001)
+        }
+
+        assertEquals(HttpStatusCode.BadRequest, missing.status)
+        assertEquals(HttpStatusCode.BadRequest, stale.status)
     }
 
     @Test
@@ -136,6 +142,7 @@ class ApiRoutingTest {
                 method = HttpMethod.Put
                 bearerAuth("test-token")
                 header("X-Operator-Id", "outsider")
+                header("X-Request-Timestamp", System.currentTimeMillis())
                 contentType(ContentType.Application.Json)
                 setBody("""{"note":"attempt"}""")
             }
@@ -166,6 +173,7 @@ class ApiRoutingTest {
                 method = HttpMethod.Put
                 bearerAuth("test-token")
                 header("X-Operator-Id", "guest")
+                header("X-Request-Timestamp", System.currentTimeMillis())
                 contentType(ContentType.Application.Json)
                 setBody("""{"note":"enter"}""")
             }
@@ -182,7 +190,7 @@ class ApiRoutingTest {
                 method = HttpMethod.Post
                 bearerAuth("test-token")
                 header("X-Operator-Id", "admin")
-                header("Idempotency-Key", "event-1")
+                header("X-Request-Timestamp", System.currentTimeMillis())
                 contentType(ContentType.Application.Json)
                 setBody("""{"delta":-500,"reason":"charge"}""")
             }
@@ -192,6 +200,7 @@ class ApiRoutingTest {
                 method = HttpMethod.Get
                 bearerAuth("test-token")
                 header("X-Operator-Id", "guest")
+                header("X-Request-Timestamp", System.currentTimeMillis())
             }
             assertEquals(HttpStatusCode.OK, balance.status)
             assertEquals("""{"userId":"guest","balance":-500}""", balance.bodyAsText())
@@ -200,6 +209,7 @@ class ApiRoutingTest {
                 method = HttpMethod.Get
                 bearerAuth("test-token")
                 header("X-Operator-Id", "guest")
+                header("X-Request-Timestamp", System.currentTimeMillis())
             }
             assertEquals(HttpStatusCode.OK, changes.status)
             assertTrue(changes.bodyAsText().contains("\"reason\":\"charge\""))
@@ -208,6 +218,7 @@ class ApiRoutingTest {
                 method = HttpMethod.Get
                 bearerAuth("test-token")
                 header("X-Operator-Id", "guest")
+                header("X-Request-Timestamp", System.currentTimeMillis())
             }
             assertEquals(HttpStatusCode.OK, bill.status)
             assertTrue(bill.bodyAsText().contains("\"active\":true"))
@@ -216,6 +227,7 @@ class ApiRoutingTest {
                 method = HttpMethod.Put
                 bearerAuth("test-token")
                 header("X-Operator-Id", "guest")
+                header("X-Request-Timestamp", System.currentTimeMillis())
                 contentType(ContentType.Application.Json)
                 setBody("""{"note":"leave"}""")
             }
@@ -238,6 +250,7 @@ class ApiRoutingTest {
                 method = HttpMethod.Put
                 bearerAuth("test-token")
                 header("X-Operator-Id", "outsider")
+                header("X-Request-Timestamp", System.currentTimeMillis())
                 contentType(ContentType.Application.Json)
                 setBody(
                     """{"periods":[{"start":"0000","end":"2400","amountPerHalfHour":100,"maxAmount":7900}]}""",
@@ -249,6 +262,7 @@ class ApiRoutingTest {
                 method = HttpMethod.Put
                 bearerAuth("test-token")
                 header("X-Operator-Id", "admin")
+                header("X-Request-Timestamp", System.currentTimeMillis())
                 contentType(ContentType.Application.Json)
                 setBody(
                     """{"periods":[{"start":"0000","end":"2400","amountPerHalfHour":100,"maxAmount":7900}]}""",
@@ -263,7 +277,7 @@ class ApiRoutingTest {
     @Test
     fun `negative balance returns payment required on login`() = testApplication {
         val queue = createTestDatabaseQueue()
-        queue.adjustBalance("guest", "admin", -100, "debt", "debt-api", 1_000)
+        queue.adjustBalance("guest", "admin", -100, "debt", 1_000)
         application { rootModule(queue, "test-token") }
 
         try {
@@ -271,6 +285,7 @@ class ApiRoutingTest {
                 method = HttpMethod.Put
                 bearerAuth("test-token")
                 header("X-Operator-Id", "guest")
+                header("X-Request-Timestamp", System.currentTimeMillis())
                 contentType(ContentType.Application.Json)
                 setBody("""{"note":"enter"}""")
             }
@@ -280,6 +295,7 @@ class ApiRoutingTest {
                 method = HttpMethod.Get
                 bearerAuth("test-token")
                 header("X-Operator-Id", "admin")
+                header("X-Request-Timestamp", System.currentTimeMillis())
             }
             assertEquals(HttpStatusCode.OK, debts.status)
             assertTrue(debts.bodyAsText().contains("\"balance\":-100"))
@@ -302,6 +318,7 @@ class ApiRoutingTest {
                 method = HttpMethod.Get
                 bearerAuth("test-token")
                 header("X-Operator-Id", "guest")
+                header("X-Request-Timestamp", System.currentTimeMillis())
             }
             assertEquals(HttpStatusCode.NotFound, bill.status)
 
@@ -309,6 +326,7 @@ class ApiRoutingTest {
                 method = HttpMethod.Put
                 bearerAuth("test-token")
                 header("X-Operator-Id", "guest")
+                header("X-Request-Timestamp", System.currentTimeMillis())
                 contentType(ContentType.Application.Json)
                 setBody("""{"note":"leave"}""")
             }

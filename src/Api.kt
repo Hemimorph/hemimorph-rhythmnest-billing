@@ -48,9 +48,6 @@ fun Application.configureApi(apiToken: String) {
         exception<OperationConflictException> { call, cause ->
             call.respond(HttpStatusCode.Conflict, ApiError(checkNotNull(cause.message)))
         }
-        exception<IdempotencyConflictException> { call, cause ->
-            call.respond(HttpStatusCode.Conflict, ApiError(checkNotNull(cause.message)))
-        }
         exception<BalanceOverflowException> { call, cause ->
             call.respond(HttpStatusCode.BadRequest, ApiError(checkNotNull(cause.message)))
         }
