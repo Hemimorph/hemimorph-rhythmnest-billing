@@ -15,14 +15,60 @@ Here's a list of features included in this project:
 |------|-------------|
 
 ## Building & Running
-To build or run the project, use one of the following tasks:
 
+Build the tested server distribution in the Nix sandbox:
 
-| Task | Description |
-|------|-------------|
-| `./kotlin test`    | Run the tests     |
-| `./kotlin build`   | Build the project |
-| `./kotlin run`     | Run the server    |
+```shell
+nix build
+```
+
+The output is available at `result/bin/rhythmnest-billing`, with its runtime
+libraries under `result/lib`. Run it from any directory. If that directory
+contains a `.env`, its values are exported before startup; otherwise the server
+uses the inherited environment unchanged. It uses the JDK packaged by Nix and
+does not need Gradle at runtime.
+
+Run a disposable local environment with its own temporary PostgreSQL database:
+
+```shell
+nix run .#dev
+```
+
+The development command loads the project root `.env`, but overrides
+`HERMIMORPH_BILL_DB_JDBC_URL`, `HERMIMORPH_BILL_DB_USER`, and
+`HERMIMORPH_BILL_DB_PASSWORD` with an isolated temporary PostgreSQL connection.
+The database is removed when the process exits. Set
+`HERMIMORPH_BILL_DEV_DB_PORT` in `.env` to resolve a local database port
+conflict.
+
+For production, either export the required environment variables externally or
+create `.env` from `.env.example`, then run the packaged server:
+
+```shell
+/path/to/result/bin/rhythmnest-billing
+```
+
+The flake app has the same current-directory behavior. Point `nix run` at the
+project when invoking it elsewhere, for example
+`nix run /path/to/rhythmnest_billing#default`.
+
+Both commands run the server distribution built by Nix. They do not require
+Gradle, the ignored project-local `kotlin` launcher, or Kotlin CLI at runtime.
+
+Other project tasks are available in the Nix development shell:
+
+```shell
+nix develop
+gradle-project test
+gradle-project build
+```
+
+After changing Gradle plugins or dependencies, refresh the reproducible Nix
+dependency lock:
+
+```shell
+"$(nix build .#server.mitmCache.updateScript --no-link --print-out-paths)"
+```
 
 If the server starts successfully, you'll see the following output:
 ```
@@ -32,7 +78,7 @@ If the server starts successfully, you'll see the following output:
 
 ## Database
 
-The server requires `HERMIMORPH_BILL_HOST`, `HERMIMORPH_BILL_PORT`, `HERMIMORPH_BILL_API_TOKEN`, `HERMIMORPH_BILL_DB_JDBC_URL`, `HERMIMORPH_BILL_DB_USER`, `HERMIMORPH_BILL_DB_PASSWORD`, and `HERMIMORPH_BILL_INITIAL_ADMIN_ID` environment variables. See `.env.example` for example values. The application does not load `.env` files automatically.
+The server requires `HERMIMORPH_BILL_HOST`, `HERMIMORPH_BILL_PORT`, `HERMIMORPH_BILL_API_TOKEN`, `HERMIMORPH_BILL_DB_JDBC_URL`, `HERMIMORPH_BILL_DB_USER`, `HERMIMORPH_BILL_DB_PASSWORD`, and `HERMIMORPH_BILL_INITIAL_ADMIN_ID` environment variables. See `.env.example` for example values. `nix run .#default` loads these values from the project root `.env`; the application itself does not load `.env` files.
 
 Exposed operations must be submitted through the application-wide `DatabaseQueue`. A single worker executes transactions in queue order, and HikariCP maintains one PostgreSQL connection. This ordering guarantee only applies to a single running application instance.
 
@@ -41,7 +87,7 @@ Exposed operations must be submitted through the application-wide `DatabaseQueue
 Generate the OpenAPI 3.1 document during the build process:
 
 ```shell
-./kotlin test --include-test=io.github.hemimogph.OpenApiGenerationTest.generateOpenApi
+gradle-project test --tests io.github.hemimogph.OpenApiGenerationTest.generateOpenApi
 ```
 
 The generated document is written to `build/openapi/openapi.json`. The application does not expose OpenAPI or Swagger endpoints at runtime.
