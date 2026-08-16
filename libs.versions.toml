@@ -1,6 +1,20 @@
 [versions]
 kotlin = "2.4.0"
 logback = "1.5.35"
+exposed = "1.4.0"
+hikari = "7.1.0"
+postgresql = "42.7.13"
+coroutines = "1.11.0"
+flyway = "13.3.0"
+h2 = "2.4.240"
 
 [libraries]
 logback-classic = { module = "ch.qos.logback:logback-classic", version.ref = "logback" }
+exposed-core = { module = "org.jetbrains.exposed:exposed-core", version.ref = "exposed" }
+exposed-jdbc = { module = "org.jetbrains.exposed:exposed-jdbc", version.ref = "exposed" }
+hikari = { module = "com.zaxxer:HikariCP", version.ref = "hikari" }
+postgresql = { module = "org.postgresql:postgresql", version.ref = "postgresql" }
+kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core-jvm", version.ref = "coroutines" }
+flyway-core = { module = "org.flywaydb:flyway-core", version.ref = "flyway" }
+flyway-postgresql = { module = "org.flywaydb:flyway-database-postgresql", version.ref = "flyway" }
+h2 = { module = "com.h2database:h2", version.ref = "h2" }

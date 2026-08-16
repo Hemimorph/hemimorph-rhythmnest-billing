@@ -1,13 +1,19 @@
 package io.github.hemimogph
 
+import kotlinx.coroutines.runBlocking
 import io.ktor.server.engine.*
-import io.ktor.server.application.*
 
-fun main(args: Array<String>) {
-    embeddedServer(
-        factory = io.ktor.server.netty.Netty,
-        port = 8080,
-        host = "0.0.0.0",
-        module = Application::rootModule
-    ).start(wait = true)
+fun main(): Unit = runBlocking {
+    val serverSettings = ServerSettings.fromEnvironment()
+    val databaseRuntime = DatabaseRuntime.create()
+    try {
+        embeddedServer(
+            factory = io.ktor.server.netty.Netty,
+            port = serverSettings.port,
+            host = serverSettings.host,
+            module = { rootModule(databaseRuntime.queue, serverSettings.apiToken) },
+        ).start(wait = true)
+    } finally {
+        databaseRuntime.shutdown()
+    }
 }
