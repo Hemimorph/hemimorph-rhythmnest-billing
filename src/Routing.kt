@@ -1,6 +1,7 @@
 package io.github.hemimogph
 
 import io.ktor.http.HttpStatusCode
+import io.ktor.openapi.JsonSchema
 import io.ktor.openapi.Operation
 import io.ktor.openapi.jsonSchema
 import io.ktor.server.application.Application
@@ -53,6 +54,8 @@ private data class RatesUpdateRequest(
 @Serializable
 private data class ActiveGuestResponse(
     val userId: String,
+    @JsonSchema.Format("int64")
+    @JsonSchema.Description("Unix timestamp in milliseconds since 1970-01-01T00:00:00Z (UTC).")
     val enteredAtMs: Long,
 )
 
@@ -76,6 +79,8 @@ private enum class BalanceChangeType {
 
 @Serializable
 private data class BalanceChangeResponse(
+    @JsonSchema.Format("int64")
+    @JsonSchema.Description("Unix timestamp in milliseconds since 1970-01-01T00:00:00Z (UTC).")
     val requestedAtMs: Long,
     val operatorId: String,
     val type: BalanceChangeType,
@@ -87,7 +92,11 @@ private data class BalanceChangeResponse(
 @Serializable
 private data class BillResponse(
     val userId: String,
+    @JsonSchema.Format("int64")
+    @JsonSchema.Description("Unix timestamp in milliseconds since 1970-01-01T00:00:00Z (UTC).")
     val enteredAtMs: Long,
+    @JsonSchema.Format("int64")
+    @JsonSchema.Description("Unix timestamp in milliseconds since 1970-01-01T00:00:00Z (UTC).")
     val calculatedAtMs: Long,
     val periodCharges: List<PeriodChargeResponse>,
     val amount: Long,
@@ -95,7 +104,11 @@ private data class BillResponse(
 
 @Serializable
 private data class PeriodChargeResponse(
+    @JsonSchema.Format("int64")
+    @JsonSchema.Description("Unix timestamp in milliseconds since 1970-01-01T00:00:00Z (UTC).")
     val startedAtMs: Long,
+    @JsonSchema.Format("int64")
+    @JsonSchema.Description("Unix timestamp in milliseconds since 1970-01-01T00:00:00Z (UTC).")
     val endedAtMs: Long,
     val amount: Long,
 )
@@ -103,7 +116,11 @@ private data class PeriodChargeResponse(
 @Serializable
 private data class CheckoutResponse(
     val userId: String,
+    @JsonSchema.Format("int64")
+    @JsonSchema.Description("Unix timestamp in milliseconds since 1970-01-01T00:00:00Z (UTC).")
     val enteredAtMs: Long,
+    @JsonSchema.Format("int64")
+    @JsonSchema.Description("Unix timestamp in milliseconds since 1970-01-01T00:00:00Z (UTC).")
     val exitedAtMs: Long,
     val periodCharges: List<PeriodChargeResponse>,
     val totalAmount: Long,
@@ -144,6 +161,8 @@ private data class BalanceChangesResponse(
 
 @Serializable
 private data class BalanceAdjustmentResponse(
+    @JsonSchema.Format("int64")
+    @JsonSchema.Description("Unix timestamp in milliseconds since 1970-01-01T00:00:00Z (UTC).")
     val requestedAtMs: Long,
     val operatorId: String,
     val userId: String,
