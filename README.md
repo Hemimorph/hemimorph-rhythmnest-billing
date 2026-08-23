@@ -90,6 +90,11 @@ billing, epoch instants are converted into the server's configured local time
 zone before matching rate periods; clients must not encode a local wall-clock
 time as a Unix timestamp.
 
+Billing units are consecutive 30-minute intervals anchored at the guest's entry
+time. The rate active at the start of a unit applies to the whole unit. If a
+local rate-period boundary falls inside a unit, the new rate starts at the next
+entry-aligned unit; a final partial unit is charged as one started unit.
+
 ## OpenAPI
 
 Generate the OpenAPI 3.1 document during the build process:

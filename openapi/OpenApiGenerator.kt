@@ -20,7 +20,13 @@ fun main(args: Array<String>) {
             configureApi("openapi-generation-token")
             configureRouting()
             val document = (
-                OpenApiDoc(info = OpenApiInfo("RhythmNest Billing API", "1.0.0")) +
+                OpenApiDoc(
+                    info = OpenApiInfo(
+                        title = "RhythmNest Billing API",
+                        version = "1.0.0",
+                        description = "All monetary values are integers in the smallest currency unit: multiply the major-unit amount by 100 before sending it. For example, 1.00 is represented as 100. Responses use the same convention.",
+                    ),
+                ) +
                     routingRoot.descendants()
                 ) + findSecuritySchemesOrRefs()
             val content = OpenApiJson.encodeToString(document)
@@ -30,6 +36,8 @@ fun main(args: Array<String>) {
             check(document.paths.containsKey("/admin/debts"))
             check(content.contains("X-Operator-Id"))
             check(content.contains("X-Request-Timestamp"))
+            check(content.contains("major-unit amount by 100"))
+            check(content.contains("Charge for each started half hour"))
             check(!content.contains("processedAtMs"))
             check(!content.contains("Idempotency-Key"))
 

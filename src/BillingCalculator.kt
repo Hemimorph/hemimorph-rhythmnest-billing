@@ -1,7 +1,6 @@
 package io.github.hemimogph
 
 import java.time.Instant
-import java.time.LocalDate
 import java.time.ZoneId
 import java.util.Locale
 
@@ -31,6 +30,11 @@ class RateValidationException(message: String) : IllegalArgumentException(messag
 class RateConfigurationNotFoundException : IllegalStateException("Rate configuration not found")
 
 class BillingOverflowException : ArithmeticException("Bill exceeds the supported integer range")
+
+private data class RateOccurrence(
+    val period: RatePeriod,
+    val endedAtMs: Long,
+)
 
 fun parseRateTime(value: String, maximumMinute: Int, fieldName: String): Int {
     if (value.length != 4 || value.any { !it.isDigit() }) {
@@ -117,43 +121,70 @@ fun calculateBillBreakdown(
     if (calculatedAtMs == enteredAtMs) return BillCalculation(emptyList(), 0)
     val validatedPeriods = validateRatePeriods(periods)
 
-    val firstDate = Instant.ofEpochMilli(enteredAtMs).atZone(zoneId).toLocalDate().minusDays(1)
-    val lastDate = Instant.ofEpochMilli(calculatedAtMs).atZone(zoneId).toLocalDate()
-    var date = firstDate
+    val stayDuration = calculatedAtMs - enteredAtMs
+    val completeBillingBlocks = stayDuration / HALF_HOUR_MILLIS
+    var segmentStart = enteredAtMs
     var total = 0L
     val charges = mutableListOf<PeriodCharge>()
-    while (!date.isAfter(lastDate)) {
-        validatedPeriods.forEach { period ->
+    while (segmentStart < calculatedAtMs) {
+        val occurrence = findRateOccurrence(segmentStart, validatedPeriods, zoneId)
+        // A rate change inside a half-hour unit takes effect at the next unit
+        // boundary measured from entry, so one unit is never charged twice.
+        val boundaryOffset = occurrence.endedAtMs - enteredAtMs
+        val blocksUntilBoundary = ceilingHalfHours(boundaryOffset)
+        val segmentEnd = if (blocksUntilBoundary <= completeBillingBlocks) {
+            enteredAtMs + blocksUntilBoundary * HALF_HOUR_MILLIS
+        } else {
+            calculatedAtMs
+        }
+        check(segmentEnd > segmentStart) { "Rate period did not advance billing calculation" }
+
+        val blocks = ceilingHalfHours(segmentEnd - segmentStart)
+        val rawAmount = try {
+            Math.multiplyExact(blocks, occurrence.period.amountPerHalfHour)
+        } catch (_: ArithmeticException) {
+            throw BillingOverflowException()
+        }
+        val periodAmount = if (occurrence.period.maxAmount == -1L) {
+            rawAmount
+        } else {
+            minOf(rawAmount, occurrence.period.maxAmount)
+        }
+        total = try {
+            Math.addExact(total, periodAmount)
+        } catch (_: ArithmeticException) {
+            throw BillingOverflowException()
+        }
+        charges += PeriodCharge(segmentStart, segmentEnd, periodAmount)
+        segmentStart = segmentEnd
+    }
+    return BillCalculation(charges, total)
+}
+
+private fun findRateOccurrence(
+    atMs: Long,
+    periods: List<RatePeriod>,
+    zoneId: ZoneId,
+): RateOccurrence {
+    val localDate = Instant.ofEpochMilli(atMs).atZone(zoneId).toLocalDate()
+    for (date in listOf(localDate.minusDays(1), localDate)) {
+        periods.forEach { period ->
             val durationMinutes = period.endMinute - period.startMinute
             val normalizedStart = period.startMinute % MINUTES_PER_DAY
             val localStart = date.atStartOfDay().plusMinutes(normalizedStart.toLong())
             val localEnd = localStart.plusMinutes(durationMinutes.toLong())
             val periodStartMs = localStart.atZone(zoneId).toInstant().toEpochMilli()
             val periodEndMs = localEnd.atZone(zoneId).toInstant().toEpochMilli()
-            val overlapStart = maxOf(enteredAtMs, periodStartMs)
-            val overlapEnd = minOf(calculatedAtMs, periodEndMs)
-            if (overlapEnd > overlapStart) {
-                val elapsed = overlapEnd - overlapStart
-                val blocks = (elapsed + HALF_HOUR_MILLIS - 1) / HALF_HOUR_MILLIS
-                val rawAmount = try {
-                    Math.multiplyExact(blocks, period.amountPerHalfHour)
-                } catch (_: ArithmeticException) {
-                    throw BillingOverflowException()
-                }
-                val periodAmount = if (period.maxAmount == -1L) {
-                    rawAmount
-                } else {
-                    minOf(rawAmount, period.maxAmount)
-                }
-                total = try {
-                    Math.addExact(total, periodAmount)
-                } catch (_: ArithmeticException) {
-                    throw BillingOverflowException()
-                }
-                charges += PeriodCharge(overlapStart, overlapEnd, periodAmount)
+            if (atMs >= periodStartMs && atMs < periodEndMs) {
+                return RateOccurrence(period, periodEndMs)
             }
         }
-        date = date.plusDays(1)
     }
-    return BillCalculation(charges, total)
+    error("Validated rate periods do not cover the billing instant")
+}
+
+private fun ceilingHalfHours(durationMs: Long): Long {
+    require(durationMs > 0) { "durationMs must be positive" }
+    val completeBlocks = durationMs / HALF_HOUR_MILLIS
+    return completeBlocks + if (durationMs % HALF_HOUR_MILLIS == 0L) 0 else 1
 }

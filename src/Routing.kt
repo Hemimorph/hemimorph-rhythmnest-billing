@@ -27,12 +27,15 @@ private const val REQUEST_TIMESTAMP = "X-Request-Timestamp"
 private const val MAX_TIMESTAMP_DIFFERENCE_MS = 60_000L
 private const val DEFAULT_CHANGE_LIMIT = 5
 private const val MAX_IDENTIFIER_LENGTH = 128
+private const val MINOR_UNIT_DESCRIPTION =
+    "Integer in the smallest currency unit (major-unit amount multiplied by 100); for example, 1.00 is 100."
 
 @Serializable
 private data class OperationRequest(val note: String = "")
 
 @Serializable
 private data class BalanceAdjustmentRequest(
+    @JsonSchema.Description("Signed balance adjustment. $MINOR_UNIT_DESCRIPTION")
     val delta: Long,
     val reason: String,
 )
@@ -41,7 +44,9 @@ private data class BalanceAdjustmentRequest(
 private data class RatePeriodRequest(
     val start: String,
     val end: String,
+    @JsonSchema.Description("Charge for each started half hour. $MINOR_UNIT_DESCRIPTION")
     val amountPerHalfHour: Long,
+    @JsonSchema.Description("Maximum charge for one occurrence of this rate period, or -1 for no cap. Non-negative values use the following convention: $MINOR_UNIT_DESCRIPTION")
     val maxAmount: Long,
 )
 
@@ -68,6 +73,7 @@ private data class GuestCountResponse(
 @Serializable
 private data class BalanceResponse(
     val userId: String,
+    @JsonSchema.Description("Current balance. $MINOR_UNIT_DESCRIPTION")
     val balance: Long,
 )
 
@@ -84,7 +90,9 @@ private data class BalanceChangeResponse(
     val requestedAtMs: Long,
     val operatorId: String,
     val type: BalanceChangeType,
+    @JsonSchema.Description("Signed balance change. $MINOR_UNIT_DESCRIPTION")
     val delta: Long,
+    @JsonSchema.Description("Balance after the change. $MINOR_UNIT_DESCRIPTION")
     val balanceAfter: Long,
     val reason: String,
 )
@@ -99,6 +107,7 @@ private data class BillResponse(
     @JsonSchema.Description("Unix timestamp in milliseconds since 1970-01-01T00:00:00Z (UTC).")
     val calculatedAtMs: Long,
     val periodCharges: List<PeriodChargeResponse>,
+    @JsonSchema.Description("Total calculated bill. $MINOR_UNIT_DESCRIPTION")
     val amount: Long,
 )
 
@@ -110,6 +119,7 @@ private data class PeriodChargeResponse(
     @JsonSchema.Format("int64")
     @JsonSchema.Description("Unix timestamp in milliseconds since 1970-01-01T00:00:00Z (UTC).")
     val endedAtMs: Long,
+    @JsonSchema.Description("Charge for this rate-period occurrence. $MINOR_UNIT_DESCRIPTION")
     val amount: Long,
 )
 
@@ -123,7 +133,9 @@ private data class CheckoutResponse(
     @JsonSchema.Description("Unix timestamp in milliseconds since 1970-01-01T00:00:00Z (UTC).")
     val exitedAtMs: Long,
     val periodCharges: List<PeriodChargeResponse>,
+    @JsonSchema.Description("Total checkout charge. $MINOR_UNIT_DESCRIPTION")
     val totalAmount: Long,
+    @JsonSchema.Description("Balance remaining after checkout. $MINOR_UNIT_DESCRIPTION")
     val remainingBalance: Long,
 )
 
@@ -131,7 +143,9 @@ private data class CheckoutResponse(
 private data class RatePeriodResponse(
     val start: String,
     val end: String,
+    @JsonSchema.Description("Charge for each started half hour. $MINOR_UNIT_DESCRIPTION")
     val amountPerHalfHour: Long,
+    @JsonSchema.Description("Maximum charge for one occurrence of this rate period, or -1 for no cap. Non-negative values use the following convention: $MINOR_UNIT_DESCRIPTION")
     val maxAmount: Long,
 )
 
@@ -144,6 +158,7 @@ private data class RatesResponse(
 @Serializable
 private data class DebtResponse(
     val userId: String,
+    @JsonSchema.Description("Negative balance owed by the user. $MINOR_UNIT_DESCRIPTION")
     val balance: Long,
 )
 
@@ -166,7 +181,9 @@ private data class BalanceAdjustmentResponse(
     val requestedAtMs: Long,
     val operatorId: String,
     val userId: String,
+    @JsonSchema.Description("Signed balance adjustment. $MINOR_UNIT_DESCRIPTION")
     val delta: Long,
+    @JsonSchema.Description("Balance after the adjustment. $MINOR_UNIT_DESCRIPTION")
     val balanceAfter: Long,
     val reason: String,
 )

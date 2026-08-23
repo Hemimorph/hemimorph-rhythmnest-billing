@@ -54,21 +54,49 @@ class BillingCalculatorTest {
     }
 
     @Test
-    fun `rounds each crossed rate period independently`() {
+    fun `changes rate at the first entry-aligned half hour after a period boundary`() {
         val entered = utcMillis(2026, 1, 1, 17, 50)
-        val calculated = utcMillis(2026, 1, 1, 18, 10)
+        val calculated = utcMillis(2026, 1, 1, 18, 21)
 
+        assertEquals(
+            100,
+            calculateBill(
+                entered,
+                utcMillis(2026, 1, 1, 18, 10),
+                listOf(day, night),
+                ZoneOffset.UTC,
+            ),
+        )
         assertEquals(300, calculateBill(entered, calculated, listOf(day, night), ZoneOffset.UTC))
 
         assertEquals(
             BillCalculation(
                 periodCharges = listOf(
-                    PeriodCharge(entered, utcMillis(2026, 1, 1, 18, 0), 100),
-                    PeriodCharge(utcMillis(2026, 1, 1, 18, 0), calculated, 200),
+                    PeriodCharge(entered, utcMillis(2026, 1, 1, 18, 20), 100),
+                    PeriodCharge(utcMillis(2026, 1, 1, 18, 20), calculated, 200),
                 ),
                 totalAmount = 300,
             ),
             calculateBillBreakdown(entered, calculated, listOf(day, night), ZoneOffset.UTC),
+        )
+    }
+
+    @Test
+    fun `keeps a crossed boundary in the current half-hour charge`() {
+        val morning = RatePeriod(600, 1080, 100, -1)
+        val overnight = RatePeriod(1080, 2040, 200, -1)
+        val entered = utcMillis(2026, 1, 1, 9, 45)
+        val calculated = utcMillis(2026, 1, 1, 10, 31)
+
+        assertEquals(
+            BillCalculation(
+                periodCharges = listOf(
+                    PeriodCharge(entered, utcMillis(2026, 1, 1, 10, 15), 200),
+                    PeriodCharge(utcMillis(2026, 1, 1, 10, 15), calculated, 100),
+                ),
+                totalAmount = 300,
+            ),
+            calculateBillBreakdown(entered, calculated, listOf(morning, overnight), ZoneOffset.UTC),
         )
     }
 
